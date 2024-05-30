@@ -1,0 +1,23 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.8.34322.80
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{888888A0-9F3D-457C-B088-3A5042F75D52}") = "Network Traffic Monitor", "Network Traffic Monitor.pyproj", "{97DEAD35-2AC3-4DB6-941C-DAAB3DEC3A8B}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{97DEAD35-2AC3-4DB6-941C-DAAB3DEC3A8B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{97DEAD35-2AC3-4DB6-941C-DAAB3DEC3A8B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {67C28C0E-171E-4FB3-AEBD-4F64DD842852}
+	EndGlobalSection
+EndGlobal
