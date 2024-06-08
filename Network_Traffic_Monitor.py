@@ -1,4 +1,5 @@
 from csv import Sniffer
+import logging
 from re import I
 import tkinter as tk;
 from tkinter import messagebox as mb;
@@ -15,6 +16,8 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 import matplotlib.ticker as ticker
+import scapy.all as scapy
+
 
 from turtle import width, window_height;
 
@@ -38,9 +41,12 @@ GUI = None;
 
 #Main GUI
 class GUI:
-    interface_dict = "";    
+    interface_dict = "";
+    network_dict = "";
     adapter = "";
     adapter_isLive = False;
+    running_threads = [];
+    stop_threads = False;
 
     def __init__(self, master=None): 
         #Stop Thread Event
@@ -50,15 +56,15 @@ class GUI:
         tabTools = ttk.Notebook(window);
         device = ttk.Frame(tabTools);
         scanners = ttk.Frame(tabTools);
-        nmap = ttk.Frame(tabTools);
         sniffer = ttk.Frame(tabTools);
-        lldpa = ttk.Frame(tabTools);
+        analyzer = ttk.Frame(tabTools);
+        options = ttk.Frame(tabTools);
 
         tabTools.add(device, text="Device");
         tabTools.add(scanners, text="Network Scanners");
-        tabTools.add(nmap, text="NMAP Scanner");
         tabTools.add(sniffer, text="Packet Sniffer");
-        tabTools.add(lldpa, text="LLDP Packet Analyzer");
+        tabTools.add(analyzer, text="Packet Analyzer");
+        tabTools.add(options, text="Options");
         tabTools.pack(expand=1, fill="both")
 
         # Device Frame A : Device Info | Device Tab
@@ -103,9 +109,9 @@ class GUI:
 
         # Device Frame D : Bandwidth Monitor | Device Tab
         devD_Height = 722;
-        devD_Width = 295;
+        devD_Width = 310;
         self.Current_Bandwidth = tk.LabelFrame(device);
-        self.Current_Bandwidth.configure(height=devC_Height, width=devC_Width, borderwidth=3, relief="groove", text="Bandwidth Info");
+        self.Current_Bandwidth.configure(height=devD_Height, width=devD_Width, borderwidth=3, relief="groove", text="Bandwidth Info");
         self.Current_Bandwidth.place(anchor="nw", x=1030, y=5);     
 
         self.System_Bandwidth_Label = tk.Label(self.Current_Bandwidth);
@@ -152,7 +158,53 @@ class GUI:
         self.Current_Adapter_Speed.configure(background="#DCDCDC", foreground="#000000", borderwidth=3, relief="groove", font="{Courier} 9 {}");
         self.Current_Adapter_Speed.place(anchor="nw", x=3, y=644); 
         self.Current_Adapter_Speed.configure(state='disabled');
+    
+        # Scanner Frame A : Network Details
+        scanA_Height = 410;
+        scanA_Width = 405;
+        self.Current_Network = tk.LabelFrame(scanners);
+        self.Current_Network.configure(height=scanA_Height, width=scanA_Width, borderwidth=3, relief="groove", text="Network Info");
+        self.Current_Network.place(anchor="nw", x=5, y=5);  
 
+        self.Current_Network_Details = tk.Text(self.Current_Network,height=25, width=98);
+        self.Current_Network_Details.configure(background="#DCDCDC", foreground="#000000", borderwidth=3, relief="sunken", font="{Courier} 9 {}");
+        self.Current_Network_Details.place(anchor="nw", x=2, y=2);                                       
+        self.Current_Network_Details.insert("1.0",scanT.Get_Network_Data());
+        self.Current_Network_Details.configure(state='disabled');
+
+        # Scanner Frame B : Ping Sweeper
+
+        # Scanner Frame C : IP Detector
+
+        # Scanner Frame D : NMAP Scanner
+
+        # Scanner Frame E : Console
+
+
+
+        # Options Frame A : Console
+        opA_Height = 410;
+        opA_Width = 705;
+        self.Console = tk.LabelFrame(options);
+        self.Console.configure(height=opA_Height, width=opA_Width, borderwidth=3, relief="groove", text="Console");
+        self.Console.place(anchor="nw", x=5, y=5);  
+
+        self.Console_Output = tk.Text(self.Console,height=25, width=98);
+        self.Console_Output.configure(background="#DCDCDC", foreground="#000000", borderwidth=3, relief="sunken", font="{Courier} 9 {}");
+        self.Console_Output.place(anchor="nw", x=2, y=2);                                       
+        self.Console_Output.insert("1.0", scanT.Get_Network_Data());
+        self.Console_Output.configure(state='disabled');
+    
+        # Options Frame B : Menu
+        opB_Height = 722;
+        opB_Width = 295;
+        self.Menu = tk.LabelFrame(options);
+        self.Menu.configure(height=opB_Height, width=opB_Width, borderwidth=3, relief="groove", text="Menu");
+        self.Menu.place(anchor="nw", x=1030, y=5);     
+    
+        # Shut Down Button
+        self.Shut_Down_Button = ttk.Button(self.Menu, text="SHUT DOWN", width=45,  command=lambda: [devT.shutdown(window,self.running_threads), setattr(self, 'stop_threads', True)]);
+        self.Shut_Down_Button.place(anchor="nw", x=15, y=375)
 
     #Update Netstat w/ Threading
     def update_netstat_info(self):
@@ -165,8 +217,11 @@ class GUI:
             self.stop_event.set();
 
         self.stop_event.clear()
-        threadStat = threading.Thread(target=run_netstat, name="threadStat");
+        threadStat = threading.Thread(target=run_netstat);
+        self.running_threads.append(threadStat);
+        threadStat.daemon = True;
         threadStat.start();
+        
     
     #System Bandwidth Monitor
     def bandwidth_usage_monitor_main(self):
@@ -220,17 +275,22 @@ class GUI:
                     del self.net_in_values[0];
                     del self.net_out_values[0];
                
+                if not self.stop_threads:
+                    pass
         
                 update_plot();
                 
-        threadSysBand = threading.Thread(target=get_net_speed, name="threadSysBand");
+        threadSysBand = threading.Thread(target=get_net_speed);
+        self.running_threads.append(threadSysBand);
+        threadSysBand.daemon = True;
         threadSysBand.start();
+        
     
     def get_adapters(self):
         self.interface_dict = devT.Get_Interface_Names();
         
         adapters = list(self.interface_dict.keys());   
-    
+        logging.debug(adapters)
         #Update Adapter List
         self.Select_Adapter['values'] = adapters;
 
@@ -257,6 +317,9 @@ class GUI:
                     self.Current_Adapter_Speed.configure(state='disabled')
                     
                     self.adapter_isLive = True;
+                    
+                    if not self.stop_threads:
+                        pass
                 except KeyError:
                     # Handle adapter not found in the dictionary
                     self.Current_Adapter_Speed.configure(state='normal')
@@ -269,8 +332,11 @@ class GUI:
 
         # Start the new thread
         if not self.adapter_isLive:
-            self.threadAdptBand = threading.Thread(target=get_net_speed, name="threadAdptBand")
+            self.threadAdptBand = threading.Thread(target=get_net_speed)
+            self.running_threads.append(self.threadAdptBand)
+            self.threadAdptBand.daemon = True;
             self.threadAdptBand.start()
+            
 
         # Update Data
         if adapter_select in self.interface_dict:
@@ -287,7 +353,7 @@ class GUI:
         self.Current_Adapter_Details.delete("1.0", tk.END)
         self.Current_Adapter_Details.insert("1.0", output)
         self.Current_Adapter_Details.configure(state='disabled')
-
+        
 #Instantiate & Initialize
 GUI = GUI(window); 
 window.mainloop(); 

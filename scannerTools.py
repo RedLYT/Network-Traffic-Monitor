@@ -1,46 +1,46 @@
-def getCurrentNetwork(target):
-    Client_Hostname = socket.getHostname();
-    IP_Settings = subprocess.run('ipconfig /all',stdout=subprocess.PIPE,text=True).stdout.lower();
-    scan=False;
-    IP_Address = "";
-    Default_Gateway = "";
-    Subnet_Mask = "";
-    DNS_Servers = "";
-    scan = "";
+import subprocess
+import socket
+import psutil
+import re
+import xml.etree.ElementTree as ET
+
+
+def Get_Network_Data():
+    def extract_sub_domain(ipv4):
+        # Split the IPv4 address and join the first three octets
+        octets = ipv4.split('.')
+        sub_domain = '.'.join(octets[:3])
+        return sub_domain
     
-    
-    for i in IP_Settings.split('\n'):
-        #Toggle select between WLAN and Wired Ethernet Connection
+    network_dict = {}
+
+    # Get hostname
+    hostname = socket.gethostname()
+
+    # Get all network interfaces
+    net_ifs = psutil.net_if_addrs()
+
+    # Iterate over each interface
+    for interface_name, interface_addresses in net_ifs.items():
+        for address in interface_addresses:
+            if address.family == socket.AF_INET:
+                interface_info = {}
+                interface_info['ipv4_address'] = address.address
+                interface_info['netmask'] = address.netmask
+                interface_info['broadcast_ip'] = address.broadcast
+                interface_info['sub_domain'] = extract_sub_domain(address.address)
+                network_dict.setdefault(interface_name, {}).update(interface_info)
+
+    # Get gateway, assuming a single default gateway for all interfaces
+    default_gateway = psutil.net_if_stats().get('defaultgateway')
+    if default_gateway:
+        for interface_name in network_dict:
+            network_dict[interface_name]['gateway'] = default_gateway
+
+    # Add hostname to each interface
+    for interface_name in network_dict:
+        network_dict[interface_name]['hostname'] = hostname
         
-        #if 'wireless' in i: 
-        #   scan=True;
-        if((i != None) and ("ethernet adapter ethernet:" in i)):
-            scan = True
-        #if((i != None) and ("ethernet adapter vmware network adapter vmnet8:" in i)): scan=True;
-        #Only get value 1st iternation. If value != null don't retrieve
-        if scan:
-            if 'ipv4 address' in i and IP_Address == "": 
-                IP_Address = i.split(':')[1].strip();
-                IP_Address = IP_Address.replace("(preferred)","");
-            if 'default gateway' in i and Default_Gateway == "": 
-                Default_Gateway = i.split(':')[1].strip();   
-            if 'subnet mask' in i and Subnet_Mask == "": 
-                Subnet_Mask = i.split(':')[1].strip(); 
-            if 'dns servers' in i and DNS_Servers == "": 
-                DNS_Servers = i.split(':')[1].strip();         
+    return network_dict
 
-        MESSAGE = "IP v4 ad: " +  IP_Address;
-        MESSAGE += "      Subnet: " + Subnet_Mask;
-        MESSAGE += "\nHostname: " + Client_Hostname;
-        MESSAGE += "           DNS: " + DNS_Servers;
-        MESSAGE += "\nGateway:  " + Default_Gateway;
 
-        data = {
-            'ip' : IP_Address,
-            'client_host' : Client_Hostname,
-            'dns_servers' : DNS_Servers,
-            'default_gateway' : Default_Gateway,
-            'message' : MESSAGE
-            }        
-
-    return data;

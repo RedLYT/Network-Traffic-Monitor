@@ -1,7 +1,7 @@
 import subprocess
-import threading
 import psutil
 import socket
+import os
 
 def Get_Device():
     try:
@@ -82,3 +82,10 @@ def Get_Interface_Names():
         }
         
     return interface_dict
+
+def shutdown(root,running_threads):
+    print("Shutting Down Application...")
+    root.destroy();
+    os._exit(0);
+    
+
