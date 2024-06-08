@@ -41,8 +41,9 @@ GUI = None;
 
 #Main GUI
 class GUI:
-    interface_dict = "";
-    network_dict = "";
+    interface_dict = {};
+    network_dict = {};
+    current_network_dict = {};
     adapter = "";
     adapter_isLive = False;
     running_threads = [];
@@ -131,6 +132,7 @@ class GUI:
         self.Current_Bandwidth_Speed.configure(state='disabled');
         self.bandwidth_usage_monitor_main();
     
+        # Adapter Label
         self.Adapter_Bandwidth_Label = tk.Label(self.Current_Bandwidth);
         self.Adapter_Bandwidth_Label.configure(text="Adapter Bandwidth", font=('Helvetica',10,'bold'));
         self.Adapter_Bandwidth_Label.place(anchor="nw", x=2,y=353);
@@ -160,23 +162,46 @@ class GUI:
         self.Current_Adapter_Speed.configure(state='disabled');
     
         # Scanner Frame A : Network Details
-        scanA_Height = 410;
-        scanA_Width = 405;
+        scanA_Height = 210;
+        scanA_Width = 310;
         self.Current_Network = tk.LabelFrame(scanners);
         self.Current_Network.configure(height=scanA_Height, width=scanA_Width, borderwidth=3, relief="groove", text="Network Info");
         self.Current_Network.place(anchor="nw", x=5, y=5);  
 
-        self.Current_Network_Details = tk.Text(self.Current_Network,height=25, width=98);
+        self.Network_Label = tk.Label(self.Current_Network);
+        self.Network_Label.configure(text="Get Host Network Data", font=('Helvetica',10,'bold'));
+        self.Network_Label.place(anchor="nw", x=2,y=2);
+        
+        # Get Adapter Button
+        self.Get_Networks_Button = ttk.Button(self.Current_Network, text="GET NETWORKS", width=45,  command=self.get_networks);
+        self.Get_Networks_Button.place(anchor="nw", x=15, y=30)
+        
+        # Select Adapter
+        self.Select_Network = ttk.Combobox(self.Current_Network,height=10,width=25, state="readonly")
+        self.Select_Network.place(anchor="nw", x=16, y=57)
+        self.get_networks();
+
+        self.Select_Network_Button = ttk.Button(self.Current_Network, text="SELECT", width=15,  command=lambda: self.select_network(self.Select_Network.get()));
+        self.Select_Network_Button.place(anchor="nw", x=195, y=55)
+
+        # Display Adapter Details
+        self.Current_Network_Details = tk.Text(self.Current_Network, height=6, width=41);
         self.Current_Network_Details.configure(background="#DCDCDC", foreground="#000000", borderwidth=3, relief="sunken", font="{Courier} 9 {}");
-        self.Current_Network_Details.place(anchor="nw", x=2, y=2);                                       
-        self.Current_Network_Details.insert("1.0",scanT.Get_Network_Data());
+        self.Current_Network_Details.place(anchor="nw", x=3, y=85); 
         self.Current_Network_Details.configure(state='disabled');
+
 
         # Scanner Frame B : Ping Sweeper
 
         # Scanner Frame C : IP Detector
 
         # Scanner Frame D : NMAP Scanner
+        scanD_Height = 722;
+        scanD_Width = 550;
+        self.Current_Network = tk.LabelFrame(scanners);
+        self.Current_Network.configure(height=scanD_Height, width=scanD_Width, borderwidth=3, relief="groove", text="IP Scanner");
+        self.Current_Network.place(anchor="nw", x=320, y=5);  
+
 
         # Scanner Frame E : Console
 
@@ -284,13 +309,11 @@ class GUI:
         self.running_threads.append(threadSysBand);
         threadSysBand.daemon = True;
         threadSysBand.start();
-        
     
     def get_adapters(self):
         self.interface_dict = devT.Get_Interface_Names();
         
         adapters = list(self.interface_dict.keys());   
-        logging.debug(adapters)
         #Update Adapter List
         self.Select_Adapter['values'] = adapters;
 
@@ -354,6 +377,36 @@ class GUI:
         self.Current_Adapter_Details.insert("1.0", output)
         self.Current_Adapter_Details.configure(state='disabled')
         
+    def get_networks(self):
+        self.network_dict = scanT.Get_Network_Data();
+    
+        networks = list(self.network_dict.keys());
+        self.Select_Network['values'] = networks;
+
+    def select_network(self,network):
+        self.current_network_dict = {}
+        
+        # Input Network Data
+        self.current_network_dict["name"] = network;
+        self.current_network_dict["hostname"] = self.network_dict[network]["hostname"];
+        self.current_network_dict["ipv4"] = self.network_dict[network]["ipv4_address"];
+        self.current_network_dict["subdomain"] = self.network_dict[network]["sub_domain"];
+        self.current_network_dict["netmask"] = self.network_dict[network]["netmask"];
+        self.current_network_dict["broadcast_ip"] = self.network_dict[network]["broadcast_ip"];
+
+        # Update Output
+        output = f"Name : {self.current_network_dict['name']}\n" \
+        f"Hostname : {self.current_network_dict['hostname']}\n" \
+        f"IPv4 : {self.current_network_dict['ipv4']}\n" \
+        f"Subdomain : {self.current_network_dict['subdomain']}\n" \
+        f"Netmask : {self.current_network_dict['netmask']}\n" \
+        f"Broadcast IP : {self.current_network_dict['broadcast_ip']}"
+
+        self.Current_Network_Details.configure(state='normal');
+        self.Current_Network_Details.delete("1.0", tk.END)
+        self.Current_Network_Details.insert('1.0', output);
+        self.Current_Network_Details.configure(state='disabled');
+
 #Instantiate & Initialize
 GUI = GUI(window); 
 window.mainloop(); 
