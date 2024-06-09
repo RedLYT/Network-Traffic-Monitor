@@ -44,8 +44,10 @@ class GUI:
     interface_dict = {};
     network_dict = {};
     current_network_dict = {};
+    src_ip_dict = {};
     adapter = "";
     adapter_isLive = False;
+    ipscan_isLive = False;
     running_threads = [];
     stop_threads = False;
 
@@ -192,19 +194,54 @@ class GUI:
 
 
         # Scanner Frame B : Ping Sweeper
+        scanB_Height = 210;
+        scanB_Width = 310;
+        self.Ping_Sweeper = tk.LabelFrame(scanners);
+        self.Ping_Sweeper.configure(height=scanB_Height, width=scanB_Width, borderwidth=3, relief="groove", text="Ping Sweeper");
+        self.Ping_Sweeper.place(anchor="nw", x=5, y=215);  
 
-        # Scanner Frame C : IP Detector
+
+        # Scanner Frame C : IP Scanner
+        scanC_Height = 722;
+        scanC_Width = 505;
+        self.IP_Scanner = tk.LabelFrame(scanners);
+        self.IP_Scanner.configure(height=scanC_Height, width=scanC_Width, borderwidth=3, relief="groove", text="IP Scanner");
+        self.IP_Scanner.place(anchor="nw", x=320, y=5);
+        
+        # IP Input
+        self.IP_Scanner_Input = tk.Text(self.IP_Scanner, height=1, width=42);
+        self.IP_Scanner_Input.configure(background="#DCDCDC", foreground="#000000", borderwidth=3, relief="ridge", font="{Courier} 9 {}");
+        self.IP_Scanner_Input.place(anchor="nw", x=5, y=5); 
+        self.IP_Scanner_Input.insert("1.0", "Input IP Address...")
+        
+        # Start/Stop Scan Button
+        self.Start_Stop_IP_Button = ttk.Button(self.IP_Scanner, text="START SCAN", width=28, command=lambda: self.start_ip_scan(self.IP_Scanner_Input.get("1.0", "end-1c")));
+        self.Start_Stop_IP_Button.place(anchor="nw", x=315, y=5)
+        
+        # Output
+        #style = ttk.Style()
+        #style.configure("Treeview", relief="sunken")
+        self.treev = ttk.Treeview(self.IP_Scanner, height=50);
+        self.treev.column('#0');
+        self.treev.place(x=5, y=40, width=488, height=500)
+        
+        # Console Label
+        self.IP_Console_Output_Label = tk.Label(self.IP_Scanner);
+        self.IP_Console_Output_Label.configure(text="Console", font=('Helvetica',10,'bold'));
+        self.IP_Console_Output_Label.place(anchor="nw", x=2,y=545);
+        
+        # Console
+        self.IP_Console_Output = tk.Text(self.IP_Scanner,height=8, width=69);
+        self.IP_Console_Output.configure(background="#DCDCDC", foreground="#000000", borderwidth=3, relief="sunken", font="{Courier} 9 {}");
+        self.IP_Console_Output.place(anchor="nw", x=5, y=570);                                       
+        self.IP_Console_Output.configure(state='disabled');
 
         # Scanner Frame D : NMAP Scanner
         scanD_Height = 722;
-        scanD_Width = 550;
+        scanD_Width = 505;
         self.Current_Network = tk.LabelFrame(scanners);
-        self.Current_Network.configure(height=scanD_Height, width=scanD_Width, borderwidth=3, relief="groove", text="IP Scanner");
-        self.Current_Network.place(anchor="nw", x=320, y=5);  
-
-
-        # Scanner Frame E : Console
-
+        self.Current_Network.configure(height=scanD_Height, width=scanD_Width, borderwidth=3, relief="groove", text="NMAP Scanner");
+        self.Current_Network.place(anchor="nw", x=830, y=5);  
 
 
         # Options Frame A : Console
@@ -406,6 +443,74 @@ class GUI:
         self.Current_Network_Details.delete("1.0", tk.END)
         self.Current_Network_Details.insert('1.0', output);
         self.Current_Network_Details.configure(state='disabled');
+
+        self.IP_Scanner_Input.configure(state='normal');
+        self.IP_Scanner_Input.delete("1.0", tk.END)
+        self.IP_Scanner_Input.insert('1.0', self.current_network_dict['subdomain']);
+        self.IP_Scanner_Input.configure(state='disabled');
+
+    def start_ip_scan(self,subdomain):
+        # Start the new thread
+        if not self.ipscan_isLive:
+            self.threadIPScan = threading.Thread(target=self.find_ip_scan, args=(subdomain,))
+            self.running_threads.append(self.threadIPScan)
+            self.threadIPScan.daemon = True;
+            self.threadIPScan.start()
+            
+        if self.ipscan_isLive:
+            self.ipscan_isLive = False;
+            self.Start_Stop_IP_Button.configure(text="START SCAN")
+        else:
+            self.ipscan_isLive = True;
+            self.Start_Stop_IP_Button.configure(text="STOP SCAN")
+
+    def find_ip_scan(self,subdomain):
+        scapy.sniff(prn=lambda packet: self.find_ips(packet, subdomain), stop_filter=self.stop_find_ips)
+        
+    def find_ips(self,packet,subdomain):
+        print(packet.show())
+        print("searching for packets")
+        # Log to Console
+        
+        #Check ipv4 or ipv6
+        if 'IP' in packet:
+            
+            src_ip = packet['IP'].src
+            dst_ip = packet['IP'].dst
+            
+            # Check Subdomain
+            if src_ip[0:len(subdomain)] == subdomain:
+                src_hostname = self.get_hostname(src_ip);
+                dst_hostname = self.get_hostname(dst_ip);
+                src = src_ip + " (" + src_hostname + ")";
+                dest = src_ip + " (" + dst_hostname + ")";
+                if src not in self.src_ip_dict:              
+                    self.src_ip_dict[src] = [dest]
+                    
+                    # Append to Treeview
+                    row = self.treev.insert('', index=tk.END, text=src)
+                    self.treev.insert(row, tk.END, text=dest)
+                    
+                else:
+                    if dest not in self.src_ip_dict[src]:
+                        self.src_ip_dict[src].append(dest)
+                        cur_item = self.treev.focus()
+                    
+                        if (self.treev.item(cur_item)['text'] == src):
+                            self.treev.insert(cur_item, tk.END, text=dest)
+                            
+    def get_hostname(self, ip):
+        try:
+            return socket.gethostbyaddr(ip)[0]
+        except socket.herror:
+            return "Hostname N/A" 
+        
+    def stop_find_ips(self,packet):
+        return not self.ipscan_isLive
+    
+    #def clear_ipscan(self):
+        
+        
 
 #Instantiate & Initialize
 GUI = GUI(window); 
