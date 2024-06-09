@@ -17,6 +17,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 import matplotlib.ticker as ticker
 import scapy.all as scapy
+import ipaddress
 
 
 from turtle import width, window_height;
@@ -48,6 +49,7 @@ class GUI:
     adapter = "";
     adapter_isLive = False;
     ipscan_isLive = False;
+    pingsweep_isLive = False;
     running_threads = [];
     stop_threads = False;
 
@@ -192,14 +194,62 @@ class GUI:
         self.Current_Network_Details.place(anchor="nw", x=3, y=85); 
         self.Current_Network_Details.configure(state='disabled');
 
-
         # Scanner Frame B : Ping Sweeper
         scanB_Height = 513;
         scanB_Width = 310;
         self.Ping_Sweeper = tk.LabelFrame(scanners);
         self.Ping_Sweeper.configure(height=scanB_Height, width=scanB_Width, borderwidth=3, relief="groove", text="Ping Sweeper");
-        self.Ping_Sweeper.place(anchor="nw", x=5, y=215);  
-
+        self.Ping_Sweeper.place(anchor="nw", x=5, y=215);
+        
+        # Start Label
+        self.Ping_Start_Label = tk.Label(self.Ping_Sweeper);
+        self.Ping_Start_Label.configure(text="START HOST:", font=('Helvetica',10,'bold'));
+        self.Ping_Start_Label.place(anchor="nw", x=2,y=5);
+        
+        # Start Host Input
+        self.Ping_Start_Input = tk.Text(self.Ping_Sweeper, height=1, width=25);
+        self.Ping_Start_Input.configure(background="#DCDCDC", foreground="#000000", borderwidth=3, relief="ridge", font="{Courier} 9 {}");
+        self.Ping_Start_Input.place(anchor="nw", x=100, y=5); 
+        self.Ping_Start_Input.insert("1.0", "Input Start Host...")
+        self.Ping_Start_Input.bind("<Button-1>", lambda event: self.trigger_clear_placeholder(event, self.Ping_Start_Input))
+        
+        # End Label
+        self.Ping_End_Label = tk.Label(self.Ping_Sweeper);
+        self.Ping_End_Label.configure(text="END HOST:", font=('Helvetica',10,'bold'));
+        self.Ping_End_Label.place(anchor="nw", x=2,y=35);
+        
+        # End Host Input
+        self.Ping_End_Input = tk.Text(self.Ping_Sweeper, height=1, width=25);
+        self.Ping_End_Input.configure(background="#DCDCDC", foreground="#000000", borderwidth=3, relief="ridge", font="{Courier} 9 {}");
+        self.Ping_End_Input.place(anchor="nw", x=100, y=35); 
+        self.Ping_End_Input.insert("1.0", "Input End Host...")
+        self.Ping_End_Input.bind("<Button-1>", lambda event: self.trigger_clear_placeholder(event, self.Ping_End_Input))
+        
+        # Start Sweep Button
+        self.Start_Stop_Ping_Button = ttk.Button(self.Ping_Sweeper, text="START PING SWEEP", width=20,  command=lambda: self.start_ping_sweep(self.Ping_Start_Input.get("1.0", "end-1c"),self.Ping_End_Input.get("1.0", "end-1c")));
+        self.Start_Stop_Ping_Button.place(anchor="nw", x=154, y=65)
+        
+        # Hosts Label
+        self.Ping_Hosts_Label = tk.Label(self.Ping_Sweeper);
+        self.Ping_Hosts_Label.configure(text="Hosts Found", font=('Helvetica',10,'bold'));
+        self.Ping_Hosts_Label.place(anchor="nw", x=2,y=70);
+        
+        # Hosts Output
+        self.Ping_Hosts_Found = tk.Text(self.Ping_Sweeper, height=15, width=41);
+        self.Ping_Hosts_Found.configure(background="#DCDCDC", foreground="#000000", borderwidth=3, relief="sunken", font="{Courier} 9 {}");
+        self.Ping_Hosts_Found.place(anchor="nw", x=2, y=95); 
+        self.Ping_Hosts_Found.configure(state="disable");
+        
+        # Console Label
+        self.Ping_Console_Output_Label = tk.Label(self.Ping_Sweeper);
+        self.Ping_Console_Output_Label.configure(text="Console", font=('Helvetica',10,'bold'));
+        self.Ping_Console_Output_Label.place(anchor="nw", x=2,y=335);
+        
+        # Console
+        self.Ping_Console_Output = tk.Text(self.Ping_Sweeper,height=8, width=41);
+        self.Ping_Console_Output.configure(background="#DCDCDC", foreground="#000000", borderwidth=3, relief="sunken", font="{Courier} 9 {}");
+        self.Ping_Console_Output.place(anchor="nw", x=5, y=361);                                       
+        self.Ping_Console_Output.configure(state='disabled');
 
         # Scanner Frame C : IP Scanner
         scanC_Height = 722;
@@ -213,15 +263,13 @@ class GUI:
         self.IP_Scanner_Input.configure(background="#DCDCDC", foreground="#000000", borderwidth=3, relief="ridge", font="{Courier} 9 {}");
         self.IP_Scanner_Input.place(anchor="nw", x=5, y=5); 
         self.IP_Scanner_Input.insert("1.0", "Input IP Address...")
-        self.IP_Scanner_Input.bind("<Button-1>", lambda event: self.trigger_clear_placeholder(event, self.IP_Scanner_Input))
+        self.IP_Scanner_Input.bind("<Button-3>", lambda event: self.trigger_clear_placeholder(event, self.IP_Scanner_Input))
         
         # Start/Stop Scan Button
         self.Start_Stop_IP_Button = ttk.Button(self.IP_Scanner, text="START SCAN", width=28, command=lambda: self.start_ip_scan(self.IP_Scanner_Input.get("1.0", "end-1c")));
         self.Start_Stop_IP_Button.place(anchor="nw", x=315, y=5)
         
         # Output
-        #style = ttk.Style()
-        #style.configure("Treeview", relief="sunken")
         self.treev = ttk.Treeview(self.IP_Scanner, height=50);
         self.treev.column('#0');
         self.treev.place(x=5, y=40, width=488, height=500)
@@ -248,7 +296,6 @@ class GUI:
         self.Current_Network.configure(height=scanD_Height, width=scanD_Width, borderwidth=3, relief="groove", text="NMAP Scanner");
         self.Current_Network.place(anchor="nw", x=830, y=5);  
 
-
         # Options Frame A : Console
         opA_Height = 410;
         opA_Width = 705;
@@ -259,8 +306,6 @@ class GUI:
         self.Console_Output = tk.Text(self.Console,height=25, width=98);
         self.Console_Output.configure(background="#DCDCDC", foreground="#000000", borderwidth=3, relief="sunken", font="{Courier} 9 {}");
         self.Console_Output.place(anchor="nw", x=2, y=2);                                       
-        self.Console_Output.insert("1.0", scanT.Get_Network_Data());
-        self.Console_Output.configure(state='disabled');
     
         # Options Frame B : Menu
         opB_Height = 722;
@@ -455,21 +500,35 @@ class GUI:
         self.IP_Scanner_Input.configure(state='normal');
         self.IP_Scanner_Input.delete("1.0", tk.END)
         self.IP_Scanner_Input.insert('1.0', self.current_network_dict['subdomain']);
+    
+        # Get Start_IP, End_IP for Ping Sweeper
+        start_ip, end_ip = scanT.Get_Start_End_IP_Ping(self.current_network_dict["netmask"],self.current_network_dict["subdomain"])
+
+        self.Ping_Start_Input.delete("1.0", tk.END)
+        self.Ping_End_Input.delete("1.0", tk.END)
+        self.Ping_Start_Input.insert('1.0', start_ip);
+        self.Ping_End_Input.insert('1.0', end_ip);
 
     def start_ip_scan(self,subdomain):
+        Fail = False;
+        if subdomain == "Input IP Address...":
+            mb.showwarning("Alert", "No IP Given!")
+            Fail = True;
+  
         # Start the new thread
-        if not self.ipscan_isLive:
+        if not self.ipscan_isLive and not Fail:
             self.threadIPScan = threading.Thread(target=self.find_ip_scan, args=(subdomain,))
             self.running_threads.append(self.threadIPScan)
             self.threadIPScan.daemon = True;
             self.threadIPScan.start()
             
-        if self.ipscan_isLive:
-            self.ipscan_isLive = False;
-            self.Start_Stop_IP_Button.configure(text="START SCAN")
-        else:
-            self.ipscan_isLive = True;
-            self.Start_Stop_IP_Button.configure(text="STOP SCAN")
+        if not Fail:
+            if self.ipscan_isLive:
+                self.ipscan_isLive = False;
+                self.Start_Stop_IP_Button.configure(text="START SCAN")
+            else:
+                self.ipscan_isLive = True;
+                self.Start_Stop_IP_Button.configure(text="STOP SCAN")
 
     def find_ip_scan(self,subdomain):
         scapy.sniff(prn=lambda packet: self.find_ips(packet, subdomain), stop_filter=self.stop_find_ips)
@@ -488,7 +547,6 @@ class GUI:
 
         #Check ipv4 or ipv6
         if 'IP' in packet:
-            
             src_ip = packet['IP'].src
             dst_ip = packet['IP'].dst
             
@@ -528,8 +586,65 @@ class GUI:
         self.IP_Console_Output.configure(state='normal');
         self.IP_Console_Output.delete('1.0', tk.END);
         self.IP_Console_Output.configure(state='disabled');
-        
 
+    def start_ping_sweep(self,start_ip,end_ip):
+        Fail = False;
+        if start_ip == "Input Start Host..." or end_ip == "Input End Host...":
+            mb.showwarning("Alert", "No Start or End Host Given!")
+            Fail = True;
+  
+        # Start the new thread
+        if not self.pingsweep_isLive and not Fail:
+            self.threadPingSweep = threading.Thread(target=self.ping_sweep, args=(start_ip,end_ip, ))
+            self.running_threads.append(self.threadPingSweep)
+            self.threadPingSweep.daemon = True;
+            self.threadPingSweep.start()
+          
+        if not Fail:
+            if self.pingsweep_isLive:
+                self.pingsweep_isLive = False;
+                self.Start_Stop_Ping_Button.configure(text="START PING SWEEP")
+            else:
+                self.pingsweep_isLive = True;
+                self.Start_Stop_Ping_Button.configure(text="STOP PING SWEEP")
+                self.Ping_Hosts_Found.configure(state="normal");
+                self.Ping_Console_Output.configure(state="normal");
+                self.Ping_Hosts_Found.delete("1.0", tk.END)
+                self.Ping_Console_Output.delete("1.0", tk.END)
+                self.Ping_Hosts_Found.configure(state="disabled");
+                self.Ping_Console_Output.configure(state="disabled");
+            
+    def ping_sweep(self,start_ip,end_ip):    
+        # Perform the ping sweep    
+        current_array = start_ip.split('.');
+        current_ip = '.'.join(current_array)
+        while self.pingsweep_isLive:
+            self.Ping_Hosts_Found.configure(state="normal");
+            self.Ping_Console_Output.configure(state="normal");
+            
+            if current_ip != end_ip:
+                current_ip = '.'.join(current_array)
+                start_index = len(current_array)-1;
+                # Ping Current
+                self.Ping_Console_Output.insert("1.0", "Pinging : " + current_ip);
+                response = subprocess.run(['ping', current_ip], stdout=subprocess.PIPE)
+                if response.returncode == 0:
+                    self.Ping_Hosts_Found.insert("1.0", current_ip + "\n");
+                    self.Ping_Console_Output.insert("1.0", "(Response Found!) ");
+                # Update
+                if current_array[start_index] == '255':
+                    # Iterate
+                    indices = [index for index, elem in enumerate(current_array) if elem == '255']
+                    print(indices)
+                    for index in indices:
+                        current_array[index] = '0';
+                        current_array[index-1] = str(int(current_array[index-1]) + 1)
+                else:
+                    current_array[start_index] = str(int(current_array[start_index]) + 1)
+                self.Ping_Console_Output.insert("1.0", "\n");  
+            self.Ping_Hosts_Found.configure(state="disabled");
+            self.Ping_Console_Output.configure(state="disabled");
+ 
 #Instantiate & Initialize
 GUI = GUI(window); 
 window.mainloop(); 

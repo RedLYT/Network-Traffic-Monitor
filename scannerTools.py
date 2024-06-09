@@ -8,15 +8,10 @@ import xml.etree.ElementTree as ET
 def Get_Network_Data():
     def extract_sub_domain(ipv4,subnet):
         # Determine the number of octets to join based on the subnet mask
-        subnet_octets = subnet.split('.')
-        if subnet_octets[2] == '255':
-            num_octets = 3
-        elif subnet_octets[1] == '255':
-            num_octets = 2
-        else:
-            num_octets = 1
-
-        # Split the IPv4 address and join
+        subnet_octets = subnet.split('.');
+        zero_octets = [octet for octet in subnet.split('.') if octet == '0']
+        num_octets = len(subnet_octets) - len(zero_octets);
+        
         octets = ipv4.split('.')
         sub_domain = '.'.join(octets[:num_octets])
         return sub_domain
@@ -52,4 +47,20 @@ def Get_Network_Data():
         
     return network_dict
 
+def Get_Start_End_IP_Ping(subnet,subdomain):
+    # Calculate network address for netmask
+    octets = subnet.split('.');
+        
+    # Split Subdomain
+    start = subdomain.split('.');
+    while len(start) < len(octets):
+        start.append('0')
+    end = subdomain.split('.');
+    while len(end) < len(octets):
+        end.append('255')
+        
+    start_ip = '.'.join(start)
+    end_ip = '.'.join(end)
+    
+    return start_ip,end_ip
 
