@@ -1,6 +1,6 @@
 from csv import Sniffer
-import logging
-from re import I
+import sys
+from io import StringIO
 import tkinter as tk;
 from tkinter import messagebox as mb;
 from tkinter import SEL, ttk
@@ -194,7 +194,7 @@ class GUI:
 
 
         # Scanner Frame B : Ping Sweeper
-        scanB_Height = 210;
+        scanB_Height = 513;
         scanB_Width = 310;
         self.Ping_Sweeper = tk.LabelFrame(scanners);
         self.Ping_Sweeper.configure(height=scanB_Height, width=scanB_Width, borderwidth=3, relief="groove", text="Ping Sweeper");
@@ -213,6 +213,7 @@ class GUI:
         self.IP_Scanner_Input.configure(background="#DCDCDC", foreground="#000000", borderwidth=3, relief="ridge", font="{Courier} 9 {}");
         self.IP_Scanner_Input.place(anchor="nw", x=5, y=5); 
         self.IP_Scanner_Input.insert("1.0", "Input IP Address...")
+        self.IP_Scanner_Input.bind("<Button-1>", lambda event: self.trigger_clear_placeholder(event, self.IP_Scanner_Input))
         
         # Start/Stop Scan Button
         self.Start_Stop_IP_Button = ttk.Button(self.IP_Scanner, text="START SCAN", width=28, command=lambda: self.start_ip_scan(self.IP_Scanner_Input.get("1.0", "end-1c")));
@@ -224,6 +225,10 @@ class GUI:
         self.treev = ttk.Treeview(self.IP_Scanner, height=50);
         self.treev.column('#0');
         self.treev.place(x=5, y=40, width=488, height=500)
+        
+        # Clear Button
+        self.Clear_IPScan_Button = ttk.Button(self.IP_Scanner, text="CLEAR", width=35, command=lambda: self.clear_ipscan());
+        self.Clear_IPScan_Button.place(anchor="nw", x=265, y=542)
         
         # Console Label
         self.IP_Console_Output_Label = tk.Label(self.IP_Scanner);
@@ -267,7 +272,11 @@ class GUI:
         # Shut Down Button
         self.Shut_Down_Button = ttk.Button(self.Menu, text="SHUT DOWN", width=45,  command=lambda: [devT.shutdown(window,self.running_threads), setattr(self, 'stop_threads', True)]);
         self.Shut_Down_Button.place(anchor="nw", x=15, y=375)
-
+    
+    # Placeholder Clear
+    def trigger_clear_placeholder(self,event,widget):
+        widget.delete("1.0", "end");
+   
     #Update Netstat w/ Threading
     def update_netstat_info(self):
         def run_netstat():
@@ -283,8 +292,7 @@ class GUI:
         self.running_threads.append(threadStat);
         threadStat.daemon = True;
         threadStat.start();
-        
-    
+
     #System Bandwidth Monitor
     def bandwidth_usage_monitor_main(self):
         self.net_in_values = []
@@ -447,7 +455,6 @@ class GUI:
         self.IP_Scanner_Input.configure(state='normal');
         self.IP_Scanner_Input.delete("1.0", tk.END)
         self.IP_Scanner_Input.insert('1.0', self.current_network_dict['subdomain']);
-        self.IP_Scanner_Input.configure(state='disabled');
 
     def start_ip_scan(self,subdomain):
         # Start the new thread
@@ -468,10 +475,17 @@ class GUI:
         scapy.sniff(prn=lambda packet: self.find_ips(packet, subdomain), stop_filter=self.stop_find_ips)
         
     def find_ips(self,packet,subdomain):
-        print(packet.show())
-        print("searching for packets")
-        # Log to Console
-        
+        # Output to Console
+        stdout = sys.stdout
+        sys.stdout = StringIO()
+        packet.show()
+        packet_output = sys.stdout.getvalue()
+        sys.stdout = stdout
+        self.IP_Console_Output.configure(state='normal');
+        self.IP_Console_Output.insert('1.0',"\nSearching for Packets...\n");
+        self.IP_Console_Output.insert('1.0',packet_output);
+        self.IP_Console_Output.configure(state='disabled');
+
         #Check ipv4 or ipv6
         if 'IP' in packet:
             
@@ -508,8 +522,12 @@ class GUI:
     def stop_find_ips(self,packet):
         return not self.ipscan_isLive
     
-    #def clear_ipscan(self):
-        
+    def clear_ipscan(self):
+        self.treev.delete(*self.treev.get_children());
+        self.src_ip_dict = {};
+        self.IP_Console_Output.configure(state='normal');
+        self.IP_Console_Output.delete('1.0', tk.END);
+        self.IP_Console_Output.configure(state='disabled');
         
 
 #Instantiate & Initialize
