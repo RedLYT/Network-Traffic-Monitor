@@ -17,8 +17,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
 import matplotlib.ticker as ticker
 import scapy.all as scapy
-import ipaddress
-
+import nmap
 
 from turtle import width, window_height;
 
@@ -50,6 +49,7 @@ class GUI:
     adapter_isLive = False;
     ipscan_isLive = False;
     pingsweep_isLive = False;
+    NMAPScan_isLive = False;
     running_threads = [];
     stop_threads = False;
 
@@ -263,7 +263,7 @@ class GUI:
         self.IP_Scanner_Input.configure(background="#DCDCDC", foreground="#000000", borderwidth=3, relief="ridge", font="{Courier} 9 {}");
         self.IP_Scanner_Input.place(anchor="nw", x=5, y=5); 
         self.IP_Scanner_Input.insert("1.0", "Input IP Address...")
-        self.IP_Scanner_Input.bind("<Button-3>", lambda event: self.trigger_clear_placeholder(event, self.IP_Scanner_Input))
+        self.IP_Scanner_Input.bind("<Button-1>", lambda event: self.trigger_clear_placeholder(event, self.IP_Scanner_Input))
         
         # Start/Stop Scan Button
         self.Start_Stop_IP_Button = ttk.Button(self.IP_Scanner, text="START SCAN", width=28, command=lambda: self.start_ip_scan(self.IP_Scanner_Input.get("1.0", "end-1c")));
@@ -292,10 +292,79 @@ class GUI:
         # Scanner Frame D : NMAP Scanner
         scanD_Height = 722;
         scanD_Width = 505;
-        self.Current_Network = tk.LabelFrame(scanners);
-        self.Current_Network.configure(height=scanD_Height, width=scanD_Width, borderwidth=3, relief="groove", text="NMAP Scanner");
-        self.Current_Network.place(anchor="nw", x=830, y=5);  
+        self.NMAP_Scanner = tk.LabelFrame(scanners);
+        self.NMAP_Scanner.configure(height=scanD_Height, width=scanD_Width, borderwidth=3, relief="groove", text="NMAP Scanner");
+        self.NMAP_Scanner.place(anchor="nw", x=830, y=5); 
+        
+        # Select Scan Type
+        self.Select_Scan = ttk.Combobox(self.NMAP_Scanner,height=10,width=25, state="readonly")
+        self.Select_Scan['values'] = ("SYN Scan",)
+        self.Select_Scan.place(anchor="nw", x=315, y=6) 
 
+        # IP Input
+        self.NMAP_Scanner_Input = tk.Text(self.NMAP_Scanner, height=1, width=42);
+        self.NMAP_Scanner_Input.configure(background="#DCDCDC", foreground="#000000", borderwidth=3, relief="ridge", font="{Courier} 9 {}");
+        self.NMAP_Scanner_Input.place(anchor="nw", x=5, y=5); 
+        self.NMAP_Scanner_Input.insert("1.0", "Input IP Address...")
+        self.NMAP_Scanner_Input.bind("<Button-1>", lambda event: self.trigger_clear_placeholder(event, self.NMAP_Scanner_Input))
+        
+        # Start/Stop Scan Button
+        self.Start_Stop_NMAP_Button = ttk.Button(self.NMAP_Scanner, text="START NMAP SCAN", width=28, command=lambda: self.start_nmap_scan(self.NMAP_Scanner_Input.get("1.0", "end-1c"), self.Select_Scan.get(), self.Port_Start_Input.get("1.0", "end-1c"),self.Port_End_Input.get("1.0", "end-1c")));
+        self.Start_Stop_NMAP_Button.place(anchor="nw", x=311, y=64)
+
+        # Check Buttons
+        var = tk.IntVar()
+        LocalButton = tk.Radiobutton(self.NMAP_Scanner, text="Local", variable=var, value=1, command=lambda: self.scan_button_select(var.get(), self.current_network_dict.get("ipv4", "No Local IP available"), self.current_network_dict.get("subdomain", "No Subdomain Available")))
+        LocalButton.place(x=305, y=35)
+
+        RemoteButton = tk.Radiobutton(self.NMAP_Scanner, text="Remote", variable=var, value=2, command=lambda: self.scan_button_select(var.get(), self.current_network_dict.get("ipv4", "No Local IP available"), self.current_network_dict.get("subdomain", "No Subdomain Available")))
+        RemoteButton.place(x=355, y=35)
+
+        NetworkButton = tk.Radiobutton(self.NMAP_Scanner, text="Network", variable=var, value=3, command=lambda: self.scan_button_select(var.get(), self.current_network_dict.get("ipv4", "No Local IP available"), self.current_network_dict.get("subdomain", "No Subdomain Available")))
+        NetworkButton.place(x=420, y=35)
+        var.set(3);
+        
+        # Start Label
+        self.Port_Start_Label = tk.Label(self.NMAP_Scanner);
+        self.Port_Start_Label.configure(text="START PORT:", font=('Helvetica',10,'bold'));
+        self.Port_Start_Label.place(anchor="nw", x=2,y=35);
+        
+        # Start Host Input
+        self.Port_Start_Input = tk.Text(self.NMAP_Scanner, height=1, width=25);
+        self.Port_Start_Input.configure(background="#DCDCDC", foreground="#000000", borderwidth=3, relief="ridge", font="{Courier} 9 {}");
+        self.Port_Start_Input.place(anchor="nw", x=100, y=35); 
+        self.Port_Start_Input.insert("1.0", "1")
+        self.Port_Start_Input.bind("<Button-1>", lambda event: self.trigger_clear_placeholder(event, self.Port_Start_Input))
+        
+        # End Label
+        self.Port_End_Label = tk.Label(self.NMAP_Scanner);
+        self.Port_End_Label.configure(text="END PORT:", font=('Helvetica',10,'bold'));
+        self.Port_End_Label.place(anchor="nw", x=2,y=65);
+        
+        # End Host Input
+        self.Port_End_Input = tk.Text(self.NMAP_Scanner, height=1, width=25);
+        self.Port_End_Input.configure(background="#DCDCDC", foreground="#000000", borderwidth=3, relief="ridge", font="{Courier} 9 {}");
+        self.Port_End_Input.place(anchor="nw", x=100, y=65); 
+        self.Port_End_Input.insert("1.0", "65535")
+        self.Port_End_Input.bind("<Button-1>", lambda event: self.trigger_clear_placeholder(event, self.Port_End_Input))
+
+        # Ports Output
+        self.NMAP_Output = tk.Text(self.NMAP_Scanner, height=29, width=69);
+        self.NMAP_Output.configure(background="#DCDCDC", foreground="#000000", borderwidth=3, relief="sunken", font="{Courier} 9 {}");
+        self.NMAP_Output.place(anchor="nw", x=2, y=98); 
+        self.NMAP_Output.configure(state="disable");
+
+        # Console Label
+        self.NMAP_Console_Output_Label = tk.Label(self.NMAP_Scanner);
+        self.NMAP_Console_Output_Label.configure(text="Console", font=('Helvetica',10,'bold'));
+        self.NMAP_Console_Output_Label.place(anchor="nw", x=2,y=545);
+        
+        # Console
+        self.NMAP_Console_Output = tk.Text(self.NMAP_Scanner,height=8, width=69);
+        self.NMAP_Console_Output.configure(background="#DCDCDC", foreground="#000000", borderwidth=3, relief="sunken", font="{Courier} 9 {}");
+        self.NMAP_Console_Output.place(anchor="nw", x=5, y=570);                                       
+        self.NMAP_Console_Output.configure(state='disabled');
+        
         # Options Frame A : Console
         opA_Height = 410;
         opA_Width = 705;
@@ -448,8 +517,7 @@ class GUI:
             self.threadAdptBand = threading.Thread(target=get_net_speed)
             self.running_threads.append(self.threadAdptBand)
             self.threadAdptBand.daemon = True;
-            self.threadAdptBand.start()
-            
+            self.threadAdptBand.start()        
 
         # Update Data
         if adapter_select in self.interface_dict:
@@ -645,6 +713,86 @@ class GUI:
             self.Ping_Hosts_Found.configure(state="disabled");
             self.Ping_Console_Output.configure(state="disabled");
  
+    def scan_button_select(self,selection,local,subdomain):
+        if selection == 1:
+            ip = local;
+        elif selection == 2:
+            ip = "";
+        elif selection == 3:
+            if subdomain == "No Subdomain Available":
+                ip = "No Subdomain Available";
+            else:
+                array = subdomain.split('.')
+                while len(array) < 4:
+                    array.append('0');
+                array[len(array)-1] = 1;
+                strarray = [str(i) for i in array]
+                octets = '.'.join(strarray);
+                ip = octets + '-255';  
+       
+        self.NMAP_Scanner_Input.delete("1.0", tk.END);
+        self.NMAP_Scanner_Input.insert("1.0", ip);
+       
+    def start_nmap_scan(self,ip,scan,start,end):
+        Fail = False;
+        scan_dict={'SYN Scan':['-sS']}
+        if scan not in scan_dict.keys() and isinstance(start, int) and isinstance(end, int):
+            mb.showwarning("Alert", "Invalid Inputs!")
+            Fail = True;
+  
+        # Start the new thread
+        if not self.NMAPScan_isLive and not Fail:
+            self.threadNMAPScan = threading.Thread(target=self.nmap_scan, args=(ip,scan,start,end ))
+            self.running_threads.append(self.threadNMAPScan)
+            self.threadNMAPScan.daemon = True;
+            self.threadNMAPScan.start()
+          
+        if not Fail:
+            if self.NMAPScan_isLive:
+                self.NMAPScan_isLive = False;
+                self.Start_Stop_NMAP_Button.configure(text="START NMAP SCAN")
+            else:
+                self.NMAPScan_isLive = True;
+                self.Start_Stop_NMAP_Button.configure(text="STOP NMAP SCAN")
+                #self.NMAP_Console_Output.configure(state="normal");
+                #self.Ping_Console_Output.configure(state="normal");
+                #self.Ping_Hosts_Found.delete("1.0", tk.END)
+                #self.Ping_Console_Output.delete("1.0", tk.END)
+                #self.Ping_Hosts_Found.configure(state="disabled");
+                #self.Ping_Console_Output.configure(state="disabled");
+    
+    def nmap_scan(self,ip,scan,start,end): 
+        self.NMAP_Console_Output.configure(state="normal");
+        self.NMAP_Output.configure(state="normal");
+        self.NMAP_Console_Output.delete('1.0', tk.END);
+        self.NMAP_Output.delete('1.0', tk.END);
+        self.NMAP_Console_Output.insert('1.0', "Starting NMAP Scan...\n");
+        scanner = nmap.PortScanner()
+        scan_dict={'SYN Scan':['-sS']}
+        ports = start + "-" + end;
+        self.NMAP_Console_Output.insert('1.0', "NMAP version: " + ".".join(map(str, scanner.nmap_version())) + "\n");
+        self.NMAP_Console_Output.insert('1.0', "Scanning IP: " + ip + "\n");
+        scanner.scan(ip,ports,scan_dict[scan][0]) #the # are port range to scan, the last part is the scan type
+        scan_info = scanner.scaninfo();
+        output = "NMAP Version: " + ".".join(map(str, scanner.nmap_version()));
+        output += "\nIP Address" + ip;
+        output += "\nPorts: " + start + " - " + end;
+        for host in scanner.all_hosts():
+                output += "\nHost: " + host;
+                for proto in scanner[host].all_protocols():
+                    output += "\nProtocol:" + str(proto.upper())
+                    open_ports = scanner[host][proto].keys()
+                    output += "\nOpen Ports: " + ", ".join(map(str, open_ports)) 
+                    
+        self.NMAP_Console_Output.insert('1.0', "Scan Complete\n");
+        self.NMAP_Output.insert('1.0', output);
+        self.NMAP_Console_Output.configure(state="disabled");
+        self.NMAP_Output.configure(state="disabled");
+
+        # Reset
+        self.NMAPScan_isLive = False;
+        self.Start_Stop_NMAP_Button.configure(text="START NMAP SCAN")
+
 #Instantiate & Initialize
 GUI = GUI(window); 
 window.mainloop(); 
