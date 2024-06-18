@@ -18,12 +18,12 @@ from matplotlib.figure import Figure
 import matplotlib.ticker as ticker
 import scapy.all as scapy
 import nmap
+import json
 
 from turtle import width, window_height;
 
 #Custom Modules
-import scannerTools as scanT;
-import deviceTools as devT;
+import customTools as custT;
 
 #Globals
 window = tk.Tk();
@@ -82,7 +82,7 @@ class GUI:
         self.Current_Device_Info = tk.Text(self.Current_Device,height=25, width=98);
         self.Current_Device_Info.configure(background="#DCDCDC", foreground="#000000", borderwidth=3, relief="sunken", font="{Courier} 9 {}");
         self.Current_Device_Info.place(anchor="nw", x=2, y=2);                                       
-        self.Current_Device_Info.insert("1.0",devT.Get_Device());
+        self.Current_Device_Info.insert("1.0",custT.Get_Device());
         self.Current_Device_Info.configure(state='disabled');
 
         # Device Frame B : IP Info | Device Tab
@@ -95,7 +95,7 @@ class GUI:
         self.Current_IP_Info = tk.Text(self.Current_IP, height=18, width=98);
         self.Current_IP_Info.configure(background="#DCDCDC", foreground="#000000", borderwidth=3, relief="sunken", font="{Courier} 9 {}");
         self.Current_IP_Info.place(anchor="nw", x=2, y=2);                                       
-        self.Current_IP_Info.insert("1.0",devT.Get_IP())      
+        self.Current_IP_Info.insert("1.0",custT.Get_IP())      
         self.Current_IP_Info.configure(state='disabled');
 
         # Device Frame C : Network Stats | Device Tab
@@ -298,7 +298,7 @@ class GUI:
         
         # Select Scan Type
         self.Select_Scan = ttk.Combobox(self.NMAP_Scanner,height=10,width=25, state="readonly")
-        self.Select_Scan['values'] = ("SYN Scan",)
+        self.Select_Scan['values'] = ("TCP Connect Scan","SYN Scan","Aggressive Scan","Ping Scan","List Scan","OS Detection")            
         self.Select_Scan.place(anchor="nw", x=315, y=6) 
 
         # IP Input
@@ -322,7 +322,7 @@ class GUI:
 
         NetworkButton = tk.Radiobutton(self.NMAP_Scanner, text="Network", variable=var, value=3, command=lambda: self.scan_button_select(var.get(), self.current_network_dict.get("ipv4", "No Local IP available"), self.current_network_dict.get("subdomain", "No Subdomain Available")))
         NetworkButton.place(x=420, y=35)
-        var.set(3);
+        var.set(1);
         
         # Start Label
         self.Port_Start_Label = tk.Label(self.NMAP_Scanner);
@@ -374,6 +374,7 @@ class GUI:
 
         self.Console_Output = tk.Text(self.Console,height=25, width=98);
         self.Console_Output.configure(background="#DCDCDC", foreground="#000000", borderwidth=3, relief="sunken", font="{Courier} 9 {}");
+        self.Console_Output.insert('1.0',"For Debugging Purposes...")
         self.Console_Output.place(anchor="nw", x=2, y=2);                                       
     
         # Options Frame B : Menu
@@ -384,7 +385,7 @@ class GUI:
         self.Menu.place(anchor="nw", x=1030, y=5);     
     
         # Shut Down Button
-        self.Shut_Down_Button = ttk.Button(self.Menu, text="SHUT DOWN", width=45,  command=lambda: [devT.shutdown(window,self.running_threads), setattr(self, 'stop_threads', True)]);
+        self.Shut_Down_Button = ttk.Button(self.Menu, text="SHUT DOWN", width=45,  command=lambda: [custT.shutdown(window,self.running_threads), setattr(self, 'stop_threads', True)]);
         self.Shut_Down_Button.place(anchor="nw", x=15, y=375)
     
     # Placeholder Clear
@@ -394,7 +395,7 @@ class GUI:
     #Update Netstat w/ Threading
     def update_netstat_info(self):
         def run_netstat():
-            netstat_output = devT.Get_NetStat();
+            netstat_output = custT.Get_NetStat();
             self.Current_Network_Info.configure(state='normal');
             self.Current_Network_Info.delete("1.0", tk.END);
             self.Current_Network_Info.insert("1.0", netstat_output);
@@ -470,7 +471,7 @@ class GUI:
         threadSysBand.start();
     
     def get_adapters(self):
-        self.interface_dict = devT.Get_Interface_Names();
+        self.interface_dict = custT.Get_Interface_Names();
         
         adapters = list(self.interface_dict.keys());   
         #Update Adapter List
@@ -536,7 +537,7 @@ class GUI:
         self.Current_Adapter_Details.configure(state='disabled')
         
     def get_networks(self):
-        self.network_dict = scanT.Get_Network_Data();
+        self.network_dict = custT.Get_Network_Data();
     
         networks = list(self.network_dict.keys());
         self.Select_Network['values'] = networks;
@@ -570,7 +571,7 @@ class GUI:
         self.IP_Scanner_Input.insert('1.0', self.current_network_dict['subdomain']);
     
         # Get Start_IP, End_IP for Ping Sweeper
-        start_ip, end_ip = scanT.Get_Start_End_IP_Ping(self.current_network_dict["netmask"],self.current_network_dict["subdomain"])
+        start_ip, end_ip = custT.Get_Start_End_IP_Ping(self.current_network_dict["netmask"],self.current_network_dict["subdomain"])
 
         self.Ping_Start_Input.delete("1.0", tk.END)
         self.Ping_End_Input.delete("1.0", tk.END)
@@ -580,8 +581,8 @@ class GUI:
     def start_ip_scan(self,subdomain):
         Fail = False;
         if subdomain == "Input IP Address...":
-            mb.showwarning("Alert", "No IP Given!")
-            Fail = True;
+           mb.showwarning("Alert", "No IP Given!")
+           Fail = True;
   
         # Start the new thread
         if not self.ipscan_isLive and not Fail:
@@ -610,16 +611,17 @@ class GUI:
         sys.stdout = stdout
         self.IP_Console_Output.configure(state='normal');
         self.IP_Console_Output.insert('1.0',"\nSearching for Packets...\n");
-        self.IP_Console_Output.insert('1.0',packet_output);
-        self.IP_Console_Output.configure(state='disabled');
 
         #Check ipv4 or ipv6
         if 'IP' in packet:
             src_ip = packet['IP'].src
             dst_ip = packet['IP'].dst
+            self.IP_Console_Output.insert('1.0',packet_output);
+            self.IP_Console_Output.insert('1.0',"\nPacket Captured!\n");
+            self.IP_Console_Output.configure(state='disabled');
             
             # Check Subdomain
-            if src_ip[0:len(subdomain)] == subdomain:
+            if src_ip[0:len(subdomain)] == subdomain or subdomain == "":
                 src_hostname = self.get_hostname(src_ip);
                 dst_hostname = self.get_hostname(dst_ip);
                 src = src_ip + " (" + src_hostname + ")";
@@ -694,11 +696,19 @@ class GUI:
                 current_ip = '.'.join(current_array)
                 start_index = len(current_array)-1;
                 # Ping Current
-                self.Ping_Console_Output.insert("1.0", "Pinging : " + current_ip);
+                self.Ping_Console_Output.insert("1.0", "Pinging : " + current_ip + "\n");
                 response = subprocess.run(['ping', current_ip], stdout=subprocess.PIPE)
+                output = response.stdout.decode('utf-8')  # Convert bytes to string
                 if response.returncode == 0:
-                    self.Ping_Hosts_Found.insert("1.0", current_ip + "\n");
-                    self.Ping_Console_Output.insert("1.0", "(Response Found!) ");
+                    if "Destination host unreachable" in output:
+                        self.Ping_Console_Output.insert("1.0", "(Destination Host Unreachable!)\n");
+                    elif "Request timed out" in output:
+                        self.Ping_Console_Output.insert("1.0", "(Request Timed Out!)\n");
+                    elif "General failure" in output:
+                        self.Ping_Console_Output.insert("1.0", "(General Failure!)\n");
+                    else:
+                        self.Ping_Hosts_Found.insert("1.0", current_ip + "\n");
+                        self.Ping_Console_Output.insert("1.0", "(Response Found!)\n");
                 # Update
                 if current_array[start_index] == '255':
                     # Iterate
@@ -710,6 +720,10 @@ class GUI:
                 else:
                     current_array[start_index] = str(int(current_array[start_index]) + 1)
                 self.Ping_Console_Output.insert("1.0", "\n");  
+            else:
+                self.pingsweep_isLive = False;
+                self.Ping_Console_Output.insert("1.0", "Scan Complete!");
+                self.Start_Stop_Ping_Button.configure(text="START PING SWEEP")   
             self.Ping_Hosts_Found.configure(state="disabled");
             self.Ping_Console_Output.configure(state="disabled");
  
@@ -735,7 +749,12 @@ class GUI:
        
     def start_nmap_scan(self,ip,scan,start,end):
         Fail = False;
-        scan_dict={'SYN Scan':['-sS']}
+        scan_dict={'TCP Connect Scan':['sT'],
+                   'SYN Scan':['-sS'],
+                   'Aggressive Scan':['-A'],
+                   'Ping Scan':['-sn'],
+                   'List Scan':['sL'],
+                   'OS Detection':['-O']}
         if scan not in scan_dict.keys() and isinstance(start, int) and isinstance(end, int):
             mb.showwarning("Alert", "Invalid Inputs!")
             Fail = True;
@@ -754,12 +773,12 @@ class GUI:
             else:
                 self.NMAPScan_isLive = True;
                 self.Start_Stop_NMAP_Button.configure(text="STOP NMAP SCAN")
-                #self.NMAP_Console_Output.configure(state="normal");
-                #self.Ping_Console_Output.configure(state="normal");
-                #self.Ping_Hosts_Found.delete("1.0", tk.END)
-                #self.Ping_Console_Output.delete("1.0", tk.END)
-                #self.Ping_Hosts_Found.configure(state="disabled");
-                #self.Ping_Console_Output.configure(state="disabled");
+                self.NMAP_Console_Output.configure(state="normal");
+                self.NMAP_Output.configure(state="normal");
+                self.NMAP_Console_Output.delete("1.0", tk.END)
+                self.NMAP_Output.delete("1.0", tk.END)
+                self.NMAP_Console_Output.configure(state="disabled");
+                self.NMAP_Output.configure(state="disabled");
     
     def nmap_scan(self,ip,scan,start,end): 
         self.NMAP_Console_Output.configure(state="normal");
@@ -768,7 +787,12 @@ class GUI:
         self.NMAP_Output.delete('1.0', tk.END);
         self.NMAP_Console_Output.insert('1.0', "Starting NMAP Scan...\n");
         scanner = nmap.PortScanner()
-        scan_dict={'SYN Scan':['-sS']}
+        scan_dict={'TCP Connect Scan':['sT'],
+                   'SYN Scan':['-sS'],
+                   'Aggressive Scan':['-A'],
+                   'Ping Scan':['-sn'],
+                   'List Scan':['sL'],
+                   'OS Detection':['-O']}
         ports = start + "-" + end;
         self.NMAP_Console_Output.insert('1.0', "NMAP version: " + ".".join(map(str, scanner.nmap_version())) + "\n");
         self.NMAP_Console_Output.insert('1.0', "Scanning IP: " + ip + "\n");
@@ -776,13 +800,28 @@ class GUI:
         scan_info = scanner.scaninfo();
         output = "NMAP Version: " + ".".join(map(str, scanner.nmap_version()));
         output += "\nIP Address" + ip;
-        output += "\nPorts: " + start + " - " + end;
-        for host in scanner.all_hosts():
-                output += "\nHost: " + host;
-                for proto in scanner[host].all_protocols():
-                    output += "\nProtocol:" + str(proto.upper())
-                    open_ports = scanner[host][proto].keys()
-                    output += "\nOpen Ports: " + ", ".join(map(str, open_ports)) 
+        if scanner.scanstats()['uphosts'] == '0':
+            print("No hosts are up. Check your IP range and network settings.")
+        else:
+            output += "\nScan Results:\n"
+            for host in scanner.all_hosts():
+                output += f"Host: {host} ({scanner[host].hostname()})\n"
+                output += f"\tState: {scanner[host].state()}\n"
+                for protocol in scanner[host].all_protocols():
+                    output += f"\tProtocol: {protocol}\n"
+                    ports = scanner[host][protocol].keys()
+                    for port in ports:
+                        output += f"\t\tPort: {port}\n"
+                        output += f"\t\tState: {scanner[host][protocol][port]['state']}\n"
+                        if 'name' in scanner[host][protocol][port] and scanner[host][protocol][port]['name'] != "":
+                            output += f"\t\tService: {scanner[host][protocol][port]['name']}\n"
+                        if 'product' in scanner[host][protocol][port] and scanner[host][protocol][port]['product'] != "":
+                            output += f"\t\tProduct: {scanner[host][protocol][port]['product']}\n"
+                        if 'version' in scanner[host][protocol][port] and scanner[host][protocol][port]['version'] != "":
+                            output += f"\t\tVersion: {scanner[host][protocol][port]['version']}\n"
+                        if 'extrainfo' in scanner[host][protocol][port] and scanner[host][protocol][port]['extrainfo'] != "":
+                            output += f"\t\tExtra Info: {scanner[host][protocol][port]['extrainfo']}\n"
+                        output += "\n"
                     
         self.NMAP_Console_Output.insert('1.0', "Scan Complete\n");
         self.NMAP_Output.insert('1.0', output);
