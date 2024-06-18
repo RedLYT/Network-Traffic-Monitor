@@ -832,6 +832,6 @@ class GUI:
         self.NMAPScan_isLive = False;
         self.Start_Stop_NMAP_Button.configure(text="START NMAP SCAN")
 
-#Instantiate & Initialize
+rebas#Instantiate & Initialize
 GUI = GUI(window); 
 window.mainloop(); 
