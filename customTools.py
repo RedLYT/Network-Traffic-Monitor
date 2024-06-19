@@ -2,6 +2,10 @@ import subprocess
 import psutil
 import socket
 import os
+import configparser
+from scapy.all import wrpcap
+from datetime import datetime
+import uuid
 
 def Get_Device():
     try:
@@ -143,8 +147,65 @@ def Get_Start_End_IP_Ping(subnet,subdomain):
     
     return start_ip,end_ip
 
+def packet_to_dict(packet):
+    # Get Timestamp
+    timestamp = packet.time;
+    datetime_obj = datetime.fromtimestamp(timestamp);
+    # Convert datetime object to a string in a specific format
+    formatted_datetime = datetime_obj.strftime("%Y-%m-%d %H:%M:%S")
+    packet_data = {
+        "Timestamp": formatted_datetime,
+        "Bytes on Wire": len(packet),
+        "Bytes Captured": len(packet.original),
+        "Interface": packet.sniffed_on,
+        "Source": packet[0][1].src if packet.haslayer('IP') else packet.src,
+        "Source Port": packet.sport if hasattr(packet, 'sport') else None,
+        "Destination": packet[0][1].dst if packet.haslayer('IP') else packet.dst,
+        "Destination Port": packet.dport if hasattr(packet, 'dport') else None,
+        "Protocol": packet[0][1].proto if packet.haslayer('IP') else packet.name,
+        "Payload":  packet[0].payload if packet.haslayer('Raw') else str(packet.payload),
+        "Packet" : packet
+    }
+    
+    # Add specific protocol information
+    if 'IP' in packet:
+        packet_data["IP Protocol"] = packet['IP'].proto
+    if 'TCP' in packet:
+        packet_data["TCP Flags"] = packet['TCP'].flags
+    if 'UDP' in packet:
+        packet_data["UDP Length"] = packet['UDP'].len
+    if 'Ether' in packet:
+        packet_data["Ethernet Type"] = hex(packet['Ether'].type)
+    if 'ICMP' in packet:
+        packet_data["ICMP Type"] = packet['ICMP'].type
+        packet_data["ICMP Code"] = packet['ICMP'].code
+    if 'HTTP' in packet:
+        packet_data["HTTP Method"] = packet['HTTP'].Method.decode('utf-8')
+        packet_data["HTTP Host"] = packet['HTTP'].Host.decode('utf-8')
+    if 'HTTPS' in packet:
+        packet_data["HTTPS Method"] = packet['HTTPS'].Method.decode('utf-8')
+        packet_data["HTTPS Host"] = packet['HTTPS'].Host.decode('utf-8')
+    if 'RFID' in packet:
+        # Assuming RFID packet structure, modify accordingly
+        packet_data["RFID Data"] = packet['RFID'].data
+    
+    return packet_data;
+
+def download_packet(destination,timestamp,packet):
+    print("Saving")
+    sanitized_timestamp = timestamp.replace(":", "-")
+    unique_id = uuid.uuid4();
+    pcap_file = f"{destination}/{sanitized_timestamp}_{unique_id}.pcap"
+     
+    # Save packets to the specified PCAP file
+    wrpcap(pcap_file, packet, append=True)
+    print(f"Packet saved to {pcap_file}")
 
 # System Tools
+#def saveconfig():
+
+#def loadconfig():
+
 def shutdown(root,running_threads):
     print("Shutting Down Application...")
     root.destroy();

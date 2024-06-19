@@ -41,6 +41,7 @@ GUI = None;
 
 #Main GUI
 class GUI:
+    destination = r"D:\Users\Red\Documents\ComScience Degree\FYP Project\Network Traffic Monitor\Network Traffic Monitor\pcap_download";
     interface_dict = {};
     network_dict = {};
     current_network_dict = {};
@@ -50,8 +51,13 @@ class GUI:
     ipscan_isLive = False;
     pingsweep_isLive = False;
     NMAPScan_isLive = False;
+    packetsniff_isLive = False;
     running_threads = [];
     stop_threads = False;
+    packet_data_list = [];
+    selected_packet = 0;
+    sniffer_search_criteria = ""
+    
 
     def __init__(self, master=None): 
         #Stop Thread Event
@@ -68,7 +74,6 @@ class GUI:
         tabTools.add(device, text="Device");
         tabTools.add(scanners, text="Network Scanners");
         tabTools.add(sniffer, text="Packet Sniffer");
-        tabTools.add(analyzer, text="Packet Analyzer");
         tabTools.add(options, text="Options");
         tabTools.pack(expand=1, fill="both")
 
@@ -270,9 +275,9 @@ class GUI:
         self.Start_Stop_IP_Button.place(anchor="nw", x=315, y=5)
         
         # Output
-        self.treev = ttk.Treeview(self.IP_Scanner, height=50);
-        self.treev.column('#0');
-        self.treev.place(x=5, y=40, width=488, height=500)
+        self.iptreev = ttk.Treeview(self.IP_Scanner, height=50);
+        self.iptreev.column('#0');
+        self.iptreev.place(x=5, y=40, width=488, height=500)
         
         # Clear Button
         self.Clear_IPScan_Button = ttk.Button(self.IP_Scanner, text="CLEAR", width=35, command=lambda: self.clear_ipscan());
@@ -365,12 +370,88 @@ class GUI:
         self.NMAP_Console_Output.place(anchor="nw", x=5, y=570);                                       
         self.NMAP_Console_Output.configure(state='disabled');
         
+        # Sniffer Frame A : Task Bar
+        sniffA_Height = 35;
+        sniffA_Width = 1315;
+        self.sniffer_bar = tk.LabelFrame(sniffer);
+        self.sniffer_bar.configure(height=sniffA_Height, width=sniffA_Width, borderwidth=3, relief="groove");
+        self.sniffer_bar.place(anchor="nw", x=10, y=5); 
+        
+        # Start Button
+        self.Start_Stop_Sniff_Button = ttk.Button(self.sniffer_bar, text="START SNIFFING", width=28, command=lambda: self.start_packet_sniff());
+        self.Start_Stop_Sniff_Button.place(anchor="nw", x=10, y=1)
+        
+        # Packet Search Filter
+        self.Sniff_Search_Input = tk.Text(self.sniffer_bar, height=1, width=25);
+        self.Sniff_Search_Input.configure(background="#DCDCDC", foreground="#000000", borderwidth=3, relief="ridge", font="{Courier} 9 {}");
+        self.Sniff_Search_Input.place(anchor="nw", x=990, y=2); 
+        self.Sniff_Search_Input.insert("1.0", "Input Search Criteria...")
+        self.Sniff_Search_Input.bind("<Button-1>", lambda event: self.trigger_clear_placeholder(event, self.Sniff_Search_Input))
+
+        # Search Button
+        self.Sniff_Search_Button = ttk.Button(self.sniffer_bar, text="Search", width=18,  command=lambda: self.sniffer_search_function(self.Sniff_Search_Input.get("1.0", "end-1c")));
+        self.Sniff_Search_Button.place(anchor="nw", x=1180, y=1)
+
+        # Sniffer Frame B : Table View
+        sniffB_Height = 500;
+        sniffB_Width = 1330;
+        self.sniffer_table = tk.LabelFrame(sniffer);
+        self.sniffer_table.configure(height=sniffB_Height, width=sniffB_Width, borderwidth=3, relief="groove", text = "Packet Table");
+        self.sniffer_table.place(anchor="nw", x=5, y=40); 
+        
+        # Table
+        column_widths = {
+            "#0": 25,
+            "timestamp": 100,
+            "source": 100,
+            "destination": 100,
+            "protocol": 100,
+            "length": 100,
+            "payload": 500
+        }
+        
+        self.packettreev = ttk.Treeview(self.sniffer_table, columns=("timestamp", "source", "destination", "protocol", "length", "payload", "info"))
+        self.packettreev.heading("#0", text="ID")
+        self.packettreev.heading("timestamp", text="Timestamp")
+        self.packettreev.heading("source", text="Source")
+        self.packettreev.heading("destination", text="Destination")
+        self.packettreev.heading("protocol", text="Protocol")
+        self.packettreev.heading("length", text="Length")
+        self.packettreev.heading("payload", text="Payload")
+        
+        self.packettreev.place(x=5, y=5, width=1313, height=462)
+        self.packettreev.bind("<<TreeviewSelect>>", self.packet_on_select)
+        self.adjust_column_widths(column_widths);
+        
+        # Sniffer Frame C : Packet Summary
+        sniffC_Height = 187;
+        sniffC_Width = 1145;
+        self.sniffer_summary = tk.LabelFrame(sniffer);
+        self.sniffer_summary.configure(height=sniffC_Height, width=sniffC_Width, borderwidth=3, relief="groove", text = "Packet Summary");
+        self.sniffer_summary.place(anchor="nw", x=5, y=540); 
+        
+        self.Packet_Summary_Text = tk.Text(self.sniffer_summary, height=10, width=160);
+        self.Packet_Summary_Text.configure(background="#DCDCDC", foreground="#000000", borderwidth=3, relief="sunken", font="{Courier} 9 {}");
+        self.Packet_Summary_Text.place(anchor="nw", x=3, y=3); 
+        self.Packet_Summary_Text.configure(state='disabled');
+
+        # Sniffer Frame D : Menu
+        sniffD_Height = 187;
+        sniffD_Width = 183;
+        self.sniffer_menu = tk.LabelFrame(sniffer);
+        self.sniffer_menu.configure(height=sniffD_Height, width=sniffD_Width, borderwidth=3, relief="groove", text = "Menu");
+        self.sniffer_menu.place(anchor="nw", x=1152, y=540); 
+        
+        # Download Button
+        self.Packet_Download_Button = ttk.Button(self.sniffer_menu, text="Save", width=20,  command=lambda: custT.download_packet(self.destination,self.packet_data_list[self.selected_packet]["Timestamp"],self.packet_data_list[self.selected_packet]["Packet"]));
+        self.Packet_Download_Button.place(anchor="nw", x=23, y=15)
+
         # Options Frame A : Console
         opA_Height = 410;
         opA_Width = 705;
         self.Console = tk.LabelFrame(options);
         self.Console.configure(height=opA_Height, width=opA_Width, borderwidth=3, relief="groove", text="Console");
-        self.Console.place(anchor="nw", x=5, y=5);  
+        self.Console.place(anchor="nw", x=5, y=5);     
 
         self.Console_Output = tk.Text(self.Console,height=25, width=98);
         self.Console_Output.configure(background="#DCDCDC", foreground="#000000", borderwidth=3, relief="sunken", font="{Courier} 9 {}");
@@ -630,16 +711,16 @@ class GUI:
                     self.src_ip_dict[src] = [dest]
                     
                     # Append to Treeview
-                    row = self.treev.insert('', index=tk.END, text=src)
-                    self.treev.insert(row, tk.END, text=dest)
+                    row = self.iptreev.insert('', index=tk.END, text=src)
+                    self.iptreev.insert(row, tk.END, text=dest)
                     
                 else:
                     if dest not in self.src_ip_dict[src]:
                         self.src_ip_dict[src].append(dest)
-                        cur_item = self.treev.focus()
+                        cur_item = self.iptreev.focus()
                     
-                        if (self.treev.item(cur_item)['text'] == src):
-                            self.treev.insert(cur_item, tk.END, text=dest)
+                        if (self.iptreev.item(cur_item)['text'] == src):
+                            self.iptreev.insert(cur_item, tk.END, text=dest)
                             
     def get_hostname(self, ip):
         try:
@@ -651,7 +732,7 @@ class GUI:
         return not self.ipscan_isLive
     
     def clear_ipscan(self):
-        self.treev.delete(*self.treev.get_children());
+        self.iptreev.delete(*self.iptreev.get_children());
         self.src_ip_dict = {};
         self.IP_Console_Output.configure(state='normal');
         self.IP_Console_Output.delete('1.0', tk.END);
@@ -831,7 +912,101 @@ class GUI:
         # Reset
         self.NMAPScan_isLive = False;
         self.Start_Stop_NMAP_Button.configure(text="START NMAP SCAN")
+        
+    def start_packet_sniff(self):
+        Fail = False;
+        # Start the new thread
+        if not self.packetsniff_isLive and not Fail:
+            self.threadPacketSniff = threading.Thread(target=self.sniff_for_packets)
+            self.running_threads.append(self.threadPacketSniff)
+            self.threadPacketSniff.daemon = True;
+            self.threadPacketSniff.start()
+            
+        if not Fail:
+            if self.packetsniff_isLive:
+                self.packetsniff_isLive = False;
+                self.Start_Stop_Sniff_Button.configure(text="START SNIFF")
+            else:
+                self.packetsniff_isLive = True;
+                self.Start_Stop_Sniff_Button.configure(text="STOP SNIFF")
+                
+    def sniff_for_packets(self):
+        scapy.sniff(prn=lambda packet: self.manage_packets(packet), stop_filter=self.stop_packet_sniff)
+    
+    def stop_packet_sniff(self, packet):
+        return not self.packetsniff_isLive
+    
+    def manage_packets(self,packet):
+        # Packet to Dict
+        packet_dict = custT.packet_to_dict(packet);
+        self.packet_data_list.append(packet_dict);
 
+        # Update Table
+        self.update_sniffer_table(packet,packet_dict);
+        
+    def update_sniffer_table(self,packet,packet_dict):
+        filter_data = False;
+        filter_string = str(self.sniffer_search_criteria);
+        if filter_string == "Input Search Criteria..." or "":
+            filter_data = False;
+        else:
+            filter_data = True; 
+
+        if filter_string.lower() in str(packet).lower() and filter_data == True:
+            self.packettreev.insert("", "end", text=str(len(self.packet_data_list)), values=(packet_dict.get("Timestamp", ""), packet_dict.get("Source", ""), packet_dict.get("Destination", ""), packet_dict.get("Protocol", ""), packet_dict.get("Bytes Captured", ""), packet_dict.get("Payload", "")))
+        self.packettreev.yview_moveto(1.0)
+        
+    def search_sniffer_table(self):
+        filter_data = False;
+        filter_string = str(self.sniffer_search_criteria);
+        if filter_string == "Input Search Criteria..." or "":
+            filter_data = False;
+        else:
+            filter_data = True;
+        self.packettreev.delete(*self.packettreev.get_children())
+        for i, data in enumerate(self.packet_data_list):
+            if filter_data and filter_string.lower() not in str(data).lower() and filter_data == True:
+                continue
+            self.packettreev.insert("", "end", text=str(i+1), values=(data.get("Timestamp", ""), data.get("Source", ""), data.get("Destination", ""), data.get("Protocol", ""), data.get("Bytes Captured", ""), data.get("Payload", "")))
+        self.packettreev.yview_moveto(1.0)
+        
+    def adjust_column_widths(self,column_widths):
+        last_column = list(column_widths.keys())[-1]
+        for col, width in column_widths.items():
+            stretch = True if col != last_column else False
+            self.packettreev.column(col, width=width, minwidth=width, stretch=stretch)
+            self.packettreev.heading(col, text=col.title())
+
+    def sniffer_search_function(self,search):
+        self.sniffer_search_criteria = search;
+        self.search_sniffer_table();
+
+    def packet_on_select(self, event):
+        selected_item = self.packettreev.focus()
+        if selected_item:
+            item_id = self.packettreev.item(selected_item, 'text')
+            if item_id.isdigit():  # Check if the extracted part is a valid integer
+                index = int(item_id) - 1
+                if 0 <= index < len(self.packet_data_list):  # Ensure index is within bounds
+                    selected_packet_dict = self.packet_data_list[index] 
+                    self.selected_packet = index;
+                    self.display_packet_summary();
+                else:
+                    print("Invalid index")
+            else:
+                print("Invalid item ID format:")
+                
+    def display_packet_summary(self):
+        output = ""
+        selected_packet_data = self.packet_data_list[self.selected_packet]
+        for key, value in selected_packet_data.items():
+            output += f"{key}: {value}\n"        
+
+        self.Packet_Summary_Text.configure(state='normal');
+        self.Packet_Summary_Text.delete("1.0", tk.END) 
+        self.Packet_Summary_Text.insert(tk.END, output)        
+        self.Packet_Summary_Text.configure(state='disabled');
+                
 #Instantiate & Initialize
 GUI = GUI(window); 
 window.mainloop(); 
