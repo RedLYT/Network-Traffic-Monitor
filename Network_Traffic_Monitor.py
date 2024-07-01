@@ -1,12 +1,14 @@
 from csv import Sniffer
 import sys
+import io
 from io import StringIO
 import tkinter as tk;
-from tkinter import messagebox as mb;
+from tkinter import PhotoImage, messagebox as mb;
 from tkinter import SEL, ttk
+from typing import Self
 import psutil;
 import time;
-import datetime;
+from datetime import datetime, timedelta;
 import platform;
 import os;
 import socket;
@@ -19,6 +21,9 @@ import matplotlib.ticker as ticker
 import scapy.all as scapy
 import nmap
 import json
+import winsound
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
 
 from turtle import width, window_height;
 
@@ -42,6 +47,7 @@ GUI = None;
 #Main GUI
 class GUI:
     destination = r"D:\Users\Red\Documents\ComScience Degree\FYP Project\Network Traffic Monitor\Network Traffic Monitor\pcap_download";
+    settings_dict = custT.loadconfig();
     interface_dict = {};
     network_dict = {};
     current_network_dict = {};
@@ -56,12 +62,26 @@ class GUI:
     stop_threads = False;
     packet_data_list = [];
     selected_packet = 0;
+    analyze_packet_list = custT.load_packets(settings_dict["Analyze"]);
+    selected_analysis_packet = 0;
     sniffer_search_criteria = ""
+    auto_sniff = tk.IntVar(value=1)
+    traffic_alert = tk.IntVar(value=1)
+    packet_alert = tk.IntVar(value=1)
     
+    # Traffic Flow Monitor
+    traffic_flow = {};
+    traffic_reset = False;
+    traffic_update = False;
+    traffic_start = None;
+    TrafficUpdate_isLive = False;
 
     def __init__(self, master=None): 
         #Stop Thread Event
-        self.stop_event = threading.Event()        
+        self.stop_event = threading.Event() 
+        
+        # Initiate Database
+        custT.create_tables();
         
         #Tabs
         tabTools = ttk.Notebook(window);
@@ -74,8 +94,15 @@ class GUI:
         tabTools.add(device, text="Device");
         tabTools.add(scanners, text="Network Scanners");
         tabTools.add(sniffer, text="Packet Sniffer");
+        tabTools.add(analyzer, text="Packet Analyzer");
         tabTools.add(options, text="Options");
         tabTools.pack(expand=1, fill="both")
+        
+        #Load Icon
+        self.directory_icon = tk.PhotoImage(file="directory.png");
+        self.directory_icon = self.directory_icon.subsample(2) 
+        self.download_icon = tk.PhotoImage(file="download.png");
+        self.download_icon = self.download_icon.subsample(2) 
 
         # Device Frame A : Device Info | Device Tab
         devA_Height = 410;
@@ -387,6 +414,10 @@ class GUI:
         self.Sniff_Search_Input.place(anchor="nw", x=990, y=2); 
         self.Sniff_Search_Input.insert("1.0", "Input Search Criteria...")
         self.Sniff_Search_Input.bind("<Button-1>", lambda event: self.trigger_clear_placeholder(event, self.Sniff_Search_Input))
+        
+        # Auto-Scroll
+        self.auto_scroll = tk.Checkbutton(self.sniffer_bar, text="Auto-Scroll", variable=self.auto_sniff)
+        self.auto_scroll.place(x=900, y=1)
 
         # Search Button
         self.Sniff_Search_Button = ttk.Button(self.sniffer_bar, text="Search", width=18,  command=lambda: self.sniffer_search_function(self.Sniff_Search_Input.get("1.0", "end-1c")));
@@ -405,23 +436,23 @@ class GUI:
             "timestamp": 100,
             "source": 100,
             "destination": 100,
-            "protocol": 100,
+            "protocols": 100,
             "length": 100,
             "payload": 500
         }
         
-        self.packettreev = ttk.Treeview(self.sniffer_table, columns=("timestamp", "source", "destination", "protocol", "length", "payload", "info"))
+        self.packettreev = ttk.Treeview(self.sniffer_table, columns=("timestamp", "source", "destination", "protocols", "length", "payload", "info"))
         self.packettreev.heading("#0", text="ID")
         self.packettreev.heading("timestamp", text="Timestamp")
         self.packettreev.heading("source", text="Source")
         self.packettreev.heading("destination", text="Destination")
-        self.packettreev.heading("protocol", text="Protocol")
+        self.packettreev.heading("protocols", text="Protocols")
         self.packettreev.heading("length", text="Length")
         self.packettreev.heading("payload", text="Payload")
         
         self.packettreev.place(x=5, y=5, width=1313, height=462)
         self.packettreev.bind("<<TreeviewSelect>>", self.packet_on_select)
-        self.adjust_column_widths(column_widths);
+        self.adjust_column_widths(column_widths,self.packettreev);
         
         # Sniffer Frame C : Packet Summary
         sniffC_Height = 187;
@@ -443,32 +474,596 @@ class GUI:
         self.sniffer_menu.place(anchor="nw", x=1152, y=540); 
         
         # Download Button
-        self.Packet_Download_Button = ttk.Button(self.sniffer_menu, text="Save", width=20,  command=lambda: custT.download_packet(self.destination,self.packet_data_list[self.selected_packet]["Timestamp"],self.packet_data_list[self.selected_packet]["Packet"]));
+        self.Packet_Download_Button = ttk.Button(self.sniffer_menu, text="Save", width=20,  command=lambda: custT.download_packet(self.settings_dict["Save"],self.packet_data_list[self.selected_packet]["Timestamp"],self.packet_data_list[self.selected_packet]["Packet"]));
         self.Packet_Download_Button.place(anchor="nw", x=23, y=15)
+
+        # Analyzer Frame A : Task Bar
+        analyzeA_Height = 35;
+        analyzeA_Width = 1315;
+        self.analyze_bar = tk.LabelFrame(analyzer);
+        self.analyze_bar.configure(height=analyzeA_Height, width=analyzeA_Width, borderwidth=3, relief="groove");
+        self.analyze_bar.place(anchor="nw", x=10, y=5); 
+        
+        # Load Button
+        self.Load_PCAP_Button = ttk.Button(self.analyze_bar, text="LOAD PCAP", width=28, command=lambda: self.load_analysis_table());
+        self.Load_PCAP_Button.place(anchor="nw", x=10, y=1)
+        
+        # Directory Text
+        self.Directory_Loc_Text = tk.Text(self.analyze_bar, height=1, width=90);
+        self.Directory_Loc_Text.configure(background="#DCDCDC", foreground="#000000", borderwidth=3, relief="sunken", font="{Courier} 9 {}");
+        self.Directory_Loc_Text.place(anchor="nw", x=280, y=4);
+        if "Analyze" in self.settings_dict:
+            self.Directory_Loc_Text.insert(tk.END, self.settings_dict["Analyze"]);
+        self.Directory_Loc_Text.configure(state='disabled');
+        
+        # Get Directory
+        self.Get_Analyze_Directory_Button = tk.Button(self.analyze_bar, image=self.directory_icon, width=28, command=lambda: self.select_directory("Analyze",self.Directory_Loc_Text));
+        self.Get_Analyze_Directory_Button.place(anchor="nw", x=920, y=3)
+        
+        # Packet Search Filter
+        self.Analyze_Search_Input = tk.Text(self.analyze_bar, height=1, width=25);
+        self.Analyze_Search_Input.configure(background="#DCDCDC", foreground="#000000", borderwidth=3, relief="ridge", font="{Courier} 9 {}");
+        self.Analyze_Search_Input.place(anchor="nw", x=990, y=2); 
+        self.Analyze_Search_Input.insert("1.0", "Input Search Criteria...")
+        self.Analyze_Search_Input.bind("<Button-1>", lambda event: self.trigger_clear_placeholder(event, self.Analyze_Search_Input))
+        
+        # Search Button
+        self.Analyze_Search_Button = ttk.Button(self.analyze_bar, text="Search", width=18,  command=lambda: self.sniffer_search_function(self.load_analysis_table()));
+        self.Analyze_Search_Button.place(anchor="nw", x=1180, y=1)
+
+        # Analyzer Frame B : Table View
+        analyzeB_Height = 250;
+        analyzeB_Width = 1330;
+        self.analyzer_table = tk.LabelFrame(analyzer);
+        self.analyzer_table.configure(height=analyzeB_Height, width=analyzeB_Width, borderwidth=3, relief="groove", text = "Packet Table");
+        self.analyzer_table.place(anchor="nw", x=5, y=40); 
+        
+        # Table
+        column_widths = {
+            "#0": 25,
+            "timestamp": 100,
+            "source": 100,
+            "destination": 100,
+            "protocols": 100,
+            "length": 100,
+            "payload": 500
+        }
+        
+        self.packettreevA = ttk.Treeview(self.analyzer_table, columns=("timestamp", "source", "destination", "protocols", "length", "payload", "info"))
+        self.packettreevA.heading("#0", text="ID")
+        self.packettreevA.heading("timestamp", text="Timestamp")
+        self.packettreevA.heading("source", text="Source")
+        self.packettreevA.heading("destination", text="Destination")
+        self.packettreevA.heading("protocols", text="Protocols")
+        self.packettreevA.heading("length", text="Length")
+        self.packettreevA.heading("payload", text="Payload")
+        
+        self.packettreevA.place(x=5, y=5, width=1313, height=215)
+        self.packettreevA.bind("<<TreeviewSelect>>", self.packet_analyze_on_select)
+        self.adjust_column_widths(column_widths,self.packettreevA);
+        self.load_analysis_table();
+
+        # Analyzer Frame C : Data Values
+        analyzerC_Height = 250;
+        analyzerC_Width = 664;
+        self.analyzer_values = tk.LabelFrame(analyzer);
+        self.analyzer_values.configure(height=analyzerC_Height, width=analyzerC_Width, borderwidth=3, relief="groove", text = "Values");
+        self.analyzer_values.place(anchor="nw", x=5, y=289); 
+        
+        self.Packet_Analysis_Values_Text = tk.Text(self.analyzer_values, height=14, width=92);
+        self.Packet_Analysis_Values_Text.configure(background="#DCDCDC", foreground="#000000", borderwidth=3, relief="sunken", font="{Courier} 9 {}");
+        self.Packet_Analysis_Values_Text.place(anchor="nw", x=3, y=3); 
+        self.Packet_Analysis_Values_Text.configure(state='disabled');
+        
+        # Analyzer Frame D : Hex Dump
+        analyzerD_Height = 250;
+        analyzerD_Width = 664;
+        self.analyzer_hex = tk.LabelFrame(analyzer);
+        self.analyzer_hex.configure(height=analyzerC_Height, width=analyzerC_Width, borderwidth=3, relief="groove", text = "Hex Dump");
+        self.analyzer_hex.place(anchor="nw", x=671, y=289); 
+        
+        self.Packet_Analysis_Hex_Text = tk.Text(self.analyzer_hex, height=14, width=92);
+        self.Packet_Analysis_Hex_Text.configure(background="#DCDCDC", foreground="#000000", borderwidth=3, relief="sunken", font="{Courier} 9 {}");
+        self.Packet_Analysis_Hex_Text.place(anchor="nw", x=3, y=3); 
+        self.Packet_Analysis_Hex_Text.configure(state='disabled');
+
+        # Analyzer Frame E : Packet Summary
+        analyzerE_Height = 187;
+        analyzerE_Width = 1145;
+        self.analyzer_summary = tk.LabelFrame(analyzer);
+        self.analyzer_summary.configure(height=analyzerE_Height, width=analyzerE_Width, borderwidth=3, relief="groove", text = "Packet Summary");
+        self.analyzer_summary.place(anchor="nw", x=5, y=540); 
+        
+        self.Packet_Analysis_Summary_Text = tk.Text(self.analyzer_summary, height=10, width=160);
+        self.Packet_Analysis_Summary_Text.configure(background="#DCDCDC", foreground="#000000", borderwidth=3, relief="sunken", font="{Courier} 9 {}");
+        self.Packet_Analysis_Summary_Text.place(anchor="nw", x=3, y=3); 
+        self.Packet_Analysis_Summary_Text.configure(state='disabled');
+
+        # Analyzer Frame D : Menu
+        sniffD_Height = 187;
+        sniffD_Width = 183;
+        self.analyzer_menu = tk.LabelFrame(analyzer);
+        self.analyzer_menu.configure(height=sniffD_Height, width=sniffD_Width, borderwidth=3, relief="groove", text = "Menu");
+        self.analyzer_menu.place(anchor="nw", x=1152, y=540); 
+        
+        # Diagram Download Button
+        self.Diagram_Download_Button = ttk.Button(self.analyzer_menu, text="View Diagram", width=20,  command=lambda: custT.download_packet_diagram(self.settings_dict["Diagram"],self.analyze_packet_list[self.selected_analysis_packet]["Packet"],self.analyze_packet_list[self.selected_analysis_packet]["File"]));
+        self.Diagram_Download_Button.place(anchor="nw", x=23, y=15)
+        
+        # Delete Button
+        self.Packet_Delete_Button = ttk.Button(self.analyzer_menu, text="Delete", width=20,  command=lambda:self.delete_refresh());
+        self.Packet_Delete_Button.place(anchor="nw", x=23, y=50)
 
         # Options Frame A : Console
         opA_Height = 410;
-        opA_Width = 705;
+        opA_Width = 900;
         self.Console = tk.LabelFrame(options);
         self.Console.configure(height=opA_Height, width=opA_Width, borderwidth=3, relief="groove", text="Console");
         self.Console.place(anchor="nw", x=5, y=5);     
 
-        self.Console_Output = tk.Text(self.Console,height=25, width=98);
+        self.Console_Output = tk.Text(self.Console,height=25, width=126);
         self.Console_Output.configure(background="#DCDCDC", foreground="#000000", borderwidth=3, relief="sunken", font="{Courier} 9 {}");
         self.Console_Output.insert('1.0',"For Debugging Purposes...")
         self.Console_Output.place(anchor="nw", x=2, y=2);                                       
     
-        # Options Frame B : Menu
-        opB_Height = 722;
-        opB_Width = 295;
+        # Options Frame B : Directory
+        opB_Height = 315;
+        opB_Width = 900;
+        self.Directory_Settings = tk.LabelFrame(options);
+        self.Directory_Settings.configure(height=opB_Height, width=opB_Width, borderwidth=3, relief="groove", text="Directories");
+        self.Directory_Settings.place(anchor="nw", x=5, y=415);     
+
+        # Save Directory
+        # Directory Label
+        self.Save_Label = tk.Label(self.Directory_Settings);
+        self.Save_Label.configure(text="SAVE DIRECTORY", font=('Helvetica',10,'bold'));
+        self.Save_Label.place(anchor="nw", x=5,y=5);
+
+        # Directory Text
+        self.Directory_Save_Text = tk.Text(self.Directory_Settings, height=1, width=110);
+        self.Directory_Save_Text.configure(background="#DCDCDC", foreground="#000000", borderwidth=3, relief="sunken", font="{Courier} 9 {}");
+        self.Directory_Save_Text.place(anchor="nw", x=15, y=30);
+        if "Save" in self.settings_dict:
+            self.Directory_Save_Text.insert(tk.END, self.settings_dict["Save"]);
+        self.Directory_Save_Text.configure(state='disabled');
+        
+        # Get Directory
+        self.Get_Save_Directory_Button = tk.Button(self.Directory_Settings, image=self.download_icon, width=28, command=lambda: self.select_directory("Save",self.Directory_Save_Text));
+        self.Get_Save_Directory_Button.place(anchor="nw", x=800, y=30)
+        
+        # Quarantine Directory
+        # Directory Label
+        self.Quarantine_Label = tk.Label(self.Directory_Settings);
+        self.Quarantine_Label.configure(text="QUARANTINE DIRECTORY", font=('Helvetica',10,'bold'));
+        self.Quarantine_Label.place(anchor="nw", x=5,y=60);
+
+        # Directory Text
+        self.Directory_Quarantine_Text = tk.Text(self.Directory_Settings, height=1, width=110);
+        self.Directory_Quarantine_Text.configure(background="#DCDCDC", foreground="#000000", borderwidth=3, relief="sunken", font="{Courier} 9 {}");
+        self.Directory_Quarantine_Text.place(anchor="nw", x=15, y=85);
+        if "Quarantine" in self.settings_dict:
+            self.Directory_Quarantine_Text.insert(tk.END, self.settings_dict["Quarantine"]);
+        self.Directory_Quarantine_Text.configure(state='disabled');
+        
+        # Get Directory
+        self.Get_Quarantine_Directory_Button = tk.Button(self.Directory_Settings, image=self.download_icon, width=28, command=lambda: self.select_directory("Quarantine",self.Directory_Quarantine_Text));
+        self.Get_Quarantine_Directory_Button.place(anchor="nw", x=800, y=85)
+        
+        # PDF Directory
+        # Directory Label
+        self.PDF_Label = tk.Label(self.Directory_Settings);
+        self.PDF_Label.configure(text="PDF REPORTS DIRECTORY", font=('Helvetica',10,'bold'));
+        self.PDF_Label.place(anchor="nw", x=5,y=115);
+
+        # Directory Text
+        self.Directory_PDF_Text = tk.Text(self.Directory_Settings, height=1, width=110);
+        self.Directory_PDF_Text.configure(background="#DCDCDC", foreground="#000000", borderwidth=3, relief="sunken", font="{Courier} 9 {}");
+        self.Directory_PDF_Text.place(anchor="nw", x=15, y=140);
+        if "PDF" in self.settings_dict:
+            self.Directory_PDF_Text.insert(tk.END, self.settings_dict["PDF"]);
+        self.Directory_PDF_Text.configure(state='disabled');
+        
+        # Get Directory
+        self.Get_PDF_Directory_Button = tk.Button(self.Directory_Settings, image=self.download_icon, width=28, command=lambda: self.select_directory("PDF",self.Directory_PDF_Text));
+        self.Get_PDF_Directory_Button.place(anchor="nw", x=800, y=140)
+        
+        # Diagram Directory
+        # Directory Label
+        #self.Diagram_Label = tk.Label(self.Directory_Settings);
+        #self.Diagram_Label.configure(text="PACKET ANALYSIS DIAGRAM DIRECTORY", font=('Helvetica',10,'bold'));
+        #self.Diagram_Label.place(anchor="nw", x=5,y=170);
+
+        # Directory Text
+        #self.Directory_Diagram_Text = tk.Text(self.Directory_Settings, height=1, width=110);
+        #self.Directory_Diagram_Text.configure(background="#DCDCDC", foreground="#000000", borderwidth=3, relief="sunken", font="{Courier} 9 {}");
+        #self.Directory_Diagram_Text.place(anchor="nw", x=15, y=195);
+        #if "Diagram" in self.settings_dict:
+        #    self.Directory_Diagram_Text.insert(tk.END, self.settings_dict["Diagram"]);
+        #self.Directory_Diagram_Text.configure(state='disabled');
+
+        # Get Directory
+        #self.Get_Diagram_Directory_Button = tk.Button(self.Directory_Settings, image=self.download_icon, width=28, command=lambda: self.select_directory("Diagram",self.Directory_Diagram_Text));
+        #self.Get_Diagram_Directory_Button.place(anchor="nw", x=800, y=195)
+        
+        # Options Frame C : Menu
+        opC_Height = 410;
+        opC_Width = 426;
         self.Menu = tk.LabelFrame(options);
-        self.Menu.configure(height=opB_Height, width=opB_Width, borderwidth=3, relief="groove", text="Menu");
-        self.Menu.place(anchor="nw", x=1030, y=5);     
+        self.Menu.configure(height=opC_Height, width=opC_Width, borderwidth=3, relief="groove", text="Menu");
+        self.Menu.place(anchor="nw", x=910, y=5);     
     
         # Shut Down Button
         self.Shut_Down_Button = ttk.Button(self.Menu, text="SHUT DOWN", width=45,  command=lambda: [custT.shutdown(window,self.running_threads), setattr(self, 'stop_threads', True)]);
-        self.Shut_Down_Button.place(anchor="nw", x=15, y=375)
+        self.Shut_Down_Button.place(anchor="nw", x=80, y=5)
+        
+        # High Traffic
+        self.high_traffic_alert = tk.Checkbutton(self.Menu, text="High Traffic Alert Notification", variable=self.traffic_alert)
+        self.high_traffic_alert.place(x=25, y=45)
+        
+        # Suspicious Packet
+        self.suspicious_packet_alert = tk.Checkbutton(self.Menu, text="Suspicious Packet Alert Notification", variable=self.packet_alert)
+        self.suspicious_packet_alert.place(x=25, y=75)
+        
+        # Alert Label
+        self.Alert_Label = tk.Label(self.Menu);
+        self.Alert_Label.configure(text="Alerts", font=('Helvetica',10,'bold'));
+        self.Alert_Label.place(anchor="nw", x=10,y=100);
+        
+        # Alert Text
+        self.Alert_Text = tk.Text(self.Menu, height=17, width=58);
+        self.Alert_Text.configure(background="#DCDCDC", foreground="#000000", borderwidth=3, relief="sunken", font="{Courier} 9 {}");
+        self.Alert_Text.place(anchor="nw", x=5, y=125);
+        self.Alert_Text.configure(state='disabled');
+        
+        # Options Frame D : Report
+        opD_Height = 315;
+        opD_Width = 426;
+        self.Report = tk.LabelFrame(options);
+        self.Report.configure(height=opD_Height, width=opD_Width, borderwidth=3, relief="groove", text="Report");
+        self.Report.place(anchor="nw", x=910, y=415); 
     
+        # Report Label
+        self.Report_Time_Label = tk.Label(self.Report);
+        self.Report_Time_Label.configure(text="Time", font=('Helvetica',10,'bold'));
+        self.Report_Time_Label.place(anchor="nw", x=10,y=10);
+
+        # Check Buttons
+        self.timevar = tk.IntVar(value=1)
+        DailyButton = tk.Radiobutton(self.Report, text="Daily", variable=self.timevar, value=1)
+        DailyButton.place(x=5, y=35)
+
+        MonthlyButton = tk.Radiobutton(self.Report, text="Monthly", variable=self.timevar, value=2)
+        MonthlyButton.place(x=60, y=35)
+
+        AnnualButton = tk.Radiobutton(self.Report, text="Annual", variable=self.timevar, value=3)
+        AnnualButton.place(x=135, y=35)
+    
+        # Report Button
+        self.Gen_Report_Button = ttk.Button(self.Report, text="GENERATE REPORT", width=45,  command=lambda: self.generate_report());
+        self.Gen_Report_Button.place(anchor="nw", x=80, y=65)
+  
+        # Report Text Label
+        self.Report_Text_Label = tk.Label(self.Report);
+        self.Report_Text_Label.configure(text="Status", font=('Helvetica',10,'bold'));
+        self.Report_Text_Label.place(anchor="nw", x=10,y=100);
+
+        # Report Text
+        self.Report_Text = tk.Text(self.Report, height=10, width=58);
+        self.Report_Text.configure(background="#DCDCDC", foreground="#000000", borderwidth=3, relief="sunken", font="{Courier} 9 {}");
+        self.Report_Text.place(anchor="nw", x=5, y=125);
+        self.Report_Text.configure(state='disabled');
+    
+    # Generate Report
+    def generate_report(self):
+        type = self.timevar.get();
+        current_date = datetime.now().date();
+        now = datetime.now()
+        if type == 1:
+            report_time = "Daily";
+            duration = now.day;
+            period_filter = f"WHERE strftime('%Y-%m-%d', Timestamp) = '{current_date.strftime('%Y-%m-%d')}'";
+        elif type == 2:
+            report_time = "Monthly";
+            duration = now.month;
+            period_filter = f"WHERE strftime('%Y-%m', Timestamp) = '{current_date.strftime('%Y-%m')}'";
+        else:
+            report_time = "Annual";
+            duration = now.year;
+            period_filter = f"WHERE strftime('%Y', Timestamp) = '{current_date.strftime('%Y')}'";
+        
+        self.Report_Text.configure(state='normal');
+        self.Report_Text.insert("1.0", "------------------------------------\n");
+        self.Report_Text.insert("1.0", "Generating New Report...\n");
+
+        # Directory Path
+        directory = self.settings_dict["PDF"];
+        file_name = f"{current_date}_{report_time}_{duration}.pdf"
+        file_path = os.path.join(directory, file_name)
+        
+        c = canvas.Canvas(file_path, pagesize=A4)
+        
+        # Header
+        c.setFont("Helvetica", 24)
+        c.drawString(50, 750, f"Network Traffic Monitor {report_time} Report")
+        c.setFont("Helvetica", 18)
+        c.drawString(50, 700, f"Generated on {current_date}")
+
+        # Device Info
+        self.Report_Text.insert("1.0", "Getting Device Info...\n");
+        
+        c.setFont("Courier", 12)
+        c.drawString(50, 600, "Device Info:")
+        device_info = self.Current_Device_Info.get('1.0', "end-1c").splitlines();
+        pos_y = 575;
+        c.setFont("Courier", 9)
+        for line in device_info:
+            c.drawString(85, pos_y, line)
+            pos_y -= 15
+        c.showPage();
+
+        # Network Info
+        self.Report_Text.insert("1.0", "Getting Network Info...\n");
+        
+        c.setFont("Courier", 12)
+        c.drawString(50, 750, "Network IP Info:")
+        ip_info = self.Current_IP_Info.get('1.0', "end-1c").splitlines();
+        pos_y = 725;
+        c.setFont("Courier", 9)
+        for line in ip_info:
+            if pos_y < 50:
+                # If pos_y goes below 50, create a new page
+                c.showPage()
+                pos_y = 750  # Reset y position for new page
+                c.setFont("Courier", 9)
+            c.drawString(70, pos_y, line)
+            pos_y -= 10  # Adjust y position for the next line
+            
+        c.showPage();
+            
+        # Ping Sweep
+        self.Report_Text.insert("1.0", "Retrieving Ping Sweep Logs...\n");
+        c.setFont("Courier", 12)
+        c.drawString(50, 750, "Ping Sweep Logs:")
+
+        search_query = f"SELECT * FROM pingsweep {period_filter} ORDER BY Timestamp ASC LIMIT 50"
+        rows = custT.fetch_data_query(search_query)
+        
+        # Coordinates and dimensions
+        x_start = 50
+        y_start = 700
+        current_x = x_start
+        line_height = 15
+    
+        # Print headers
+        headers = {
+            "ID" : 50,
+            "Timestamp" : 125,
+            "Start IP" : 175,
+            "End_IP" : 175
+            }
+        c.setFont("Courier", 10)
+        for header, width in headers.items():
+            c.drawString(current_x, y_start, header)
+            current_x += width  # Move to the next column position
+    
+        # Print data rows
+        y_position = y_start - line_height
+        for row in rows:
+            current_x = x_start
+            for i, value in enumerate(row):
+                c.drawString(current_x, y_position, str(value))
+                current_x += headers[list(headers.keys())[i]]  # Move to the next column position based on header width
+            y_position -= line_height  # Move to the next row
+            
+        c.showPage();
+
+        # IP Scan
+        self.Report_Text.insert("1.0", "Retrieving IP Scan Logs...\n");
+        c.setFont("Courier", 12)
+        c.drawString(50, 750, "IP Traffic Detected On Network:")
+        search_query = f"SELECT DISTINCT IP_Src FROM ipscan {period_filter};"
+        source_ips = custT.fetch_data_query(search_query)
+
+        
+        y_start = 700
+        y_pos = y_start
+        line_height = 15
+        for row in source_ips:
+            if y_pos < 50:
+                c.showPage()
+                y_pos = 750 
+            # Get IP Source
+            ip_src = row[0];
+            c.setFont("Courier", 10)
+            c.drawString(50, y_pos, f"{ip_src}")
+            y_pos -= line_height;
+            # Get IP Dests
+            search_query = f"SELECT DISTINCT IP_Dest FROM ipscan WHERE strftime('%Y-%m-%d', Timestamp) = '2024-07-01' AND IP_Src = '{ip_src}';"
+            dest_ips = custT.fetch_data_query(search_query)
+            for row in dest_ips:
+                if y_pos < 50:
+                    c.showPage()
+                    y_pos = 750 
+                ip_dst = row[0];
+                c.setFont("Courier", 8)
+                c.drawString(75, y_pos, f"- {ip_dst}")
+                y_pos -= line_height;
+            y_pos -= line_height*2;
+        c.showPage();
+
+        # NMAP Scan       
+        self.Report_Text.insert("1.0", "Retrieving NMAP Scan Logs...\n");
+        c.setFont("Courier", 12)
+        c.drawString(50, 750, "NMAP Scan Logs:")
+
+        search_query = f"SELECT * FROM nmap {period_filter} ORDER BY Timestamp ASC LIMIT 45"
+        rows = custT.fetch_data_query(search_query)
+        
+        # Coordinates and dimensions
+        x_start = 50
+        y_start = 700
+        current_x = x_start
+        line_height = 15
+    
+        # Print headers
+        headers = {
+            "ID" : 50,
+            "Timestamp" : 125,
+            "Scan": 110,
+            "IP": 100,
+            "Start Port" : 75,
+            "End Port" : 75
+            }
+        c.setFont("Courier", 10)
+        for header, width in headers.items():
+            c.drawString(current_x, y_start, header)
+            current_x += width  # Move to the next column position
+    
+        # Print data rows
+        y_position = y_start - line_height
+        for row in rows:
+            current_x = x_start
+            for i, value in enumerate(row):
+                c.drawString(current_x, y_position, str(value))
+                current_x += headers[list(headers.keys())[i]]  # Move to the next column position based on header width
+            y_position -= line_height  # Move to the next row
+            
+        c.showPage();
+        
+        # Traffic Volume
+        self.Report_Text.insert("1.0", "Obtaining Traffic Data...\n");
+        c.setFont("Courier", 12)
+        c.drawString(50, 750, "Traffic Volume by IP Src to IP Dest:")
+
+        search_query = f"SELECT IP_Src, IP_Dest, ROUND(Average, 2) AS Average, Count, Alerts, ROUND(Average * Count, 2) AS Total FROM trafficbase ORDER BY Total DESC"
+        rows = custT.fetch_data_query(search_query)
+        
+        # Coordinates and dimensions
+        x_start = 50
+        y_start = 700
+        current_x = x_start
+        line_height = 15
+    
+        # Print headers
+        headers = {
+            "IP_Src" : 120,
+            "IP_Dest" : 120,
+            "Average": 65,
+            "Count": 50,
+            "Alerts" : 65,
+            "Total" : 100
+            }
+        c.setFont("Courier", 10)
+        for header, width in headers.items():
+            c.drawString(current_x, y_start, header)
+            current_x += width  # Move to the next column position
+    
+        # Print data rows
+        y_position = y_start - line_height
+        for row in rows:
+            if y_position < 50:
+                c.showPage()
+                c.setFont("Courier", 10)
+                y_position = 750 
+            current_x = x_start
+            for i, value in enumerate(row):
+                c.drawString(current_x, y_position, str(value))
+                current_x += headers[list(headers.keys())[i]]  # Move to the next column position based on header width
+            y_position -= line_height  # Move to the next row
+            
+        c.showPage();       
+        
+        # Traffic Alert
+        self.Report_Text.insert("1.0", "Retrieving Traffic Alert Logs...\n");
+        c.setFont("Courier", 12)
+        c.drawString(50, 750, "High Traffic Alerts:")
+
+        search_query = f"SELECT Timestamp, IP_Src, IP_Dest, ROUND(Average, 2) AS Average, Threshold, ROUND(Packet_Count, 0) AS Packet_Count FROM trafficalert {period_filter} ORDER BY Timestamp ASC"
+        rows = custT.fetch_data_query(search_query)
+        
+        # Coordinates and dimensions
+        x_start = 50
+        y_start = 700
+        current_x = x_start
+        line_height = 15
+    
+        # Print headers
+        headers = {
+            "Timestamp" : 125,
+            "IP_Src" : 112,
+            "IP_Dest" : 112,
+            "Average" : 70,
+            "Threshold" : 65,
+            "Count" : 75
+            }
+        c.setFont("Courier", 10)
+        for header, width in headers.items():
+            c.drawString(current_x, y_start, header)
+            current_x += width  # Move to the next column position
+
+        # Print data rows
+        y_position = y_start - line_height
+        for row in rows:
+            if y_position < 50:
+                c.showPage()
+                c.setFont("Courier", 10)
+                y_position = 750 
+            current_x = x_start
+            for i, value in enumerate(row):
+                c.drawString(current_x, y_position, str(value))
+                current_x += headers[list(headers.keys())[i]]  # Move to the next column position based on header width
+            y_position -= line_height  # Move to the next row
+            
+        c.showPage();
+        
+        # Packet Alert
+        self.Report_Text.insert("1.0", "Retrieving Packet Alert Logs...\n");
+        c.setFont("Courier", 12)
+        c.drawString(50, 750, "Suspicious Packet Alerts:")
+
+        search_query = f"SELECT Timestamp, File, Type FROM packetalert {period_filter} ORDER BY Timestamp ASC"
+        rows = custT.fetch_data_query(search_query)
+        
+        # Coordinates and dimensions
+        x_start = 50
+        y_start = 700
+        current_x = x_start
+        line_height = 15
+    
+        # Print headers
+        headers = {
+            "Timestamp" : 100,
+            "File" : 300,
+            "Type" : 250,
+            }
+        c.setFont("Courier", 8)
+        for header, width in headers.items():
+            c.drawString(current_x, y_start, header)
+            current_x += width  # Move to the next column position
+    
+        # Print data rows
+        y_position = y_start - line_height
+        for row in rows:
+            if y_position < 50:
+                c.showPage()
+                c.setFont("Courier", 10)
+                y_position = 750 
+            current_x = x_start
+            for i, value in enumerate(row):
+                c.drawString(current_x, y_position, str(value))
+                current_x += headers[list(headers.keys())[i]]  # Move to the next column position based on header width
+            y_position -= line_height  # Move to the next row
+            
+        c.showPage();
+        
+        self.Report_Text.insert("1.0", "Saving PDF to Directory...\n");
+        c.save()
+        self.Report_Text.insert("1.0", "Report Generated!\n");
+        self.Report_Text.insert("1.0", "------------------------------------\n");
+        self.notification();
+
+        self.Report_Text.configure(state='disabled');
+
     # Placeholder Clear
     def trigger_clear_placeholder(self,event,widget):
         widget.delete("1.0", "end");
@@ -707,6 +1302,8 @@ class GUI:
                 dst_hostname = self.get_hostname(dst_ip);
                 src = src_ip + " (" + src_hostname + ")";
                 dest = src_ip + " (" + dst_hostname + ")";
+                
+                
                 if src not in self.src_ip_dict:              
                     self.src_ip_dict[src] = [dest]
                     
@@ -714,10 +1311,25 @@ class GUI:
                     row = self.iptreev.insert('', index=tk.END, text=src)
                     self.iptreev.insert(row, tk.END, text=dest)
                     
+                    # Update Database
+                    ipscan_values = {
+                        "Timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                        "IP_Src": src,
+                        "IP_Dest": dest
+                    }
+                    custT.insert_table('ipscan',ipscan_values)  
+                    
                 else:
                     if dest not in self.src_ip_dict[src]:
                         self.src_ip_dict[src].append(dest)
                         cur_item = self.iptreev.focus()
+                        # Update Database
+                        ipscan_values = {
+                            "Timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                            "IP_Src": src,
+                            "IP_Dest": dest
+                        }
+                        custT.insert_table('ipscan',ipscan_values)  
                     
                         if (self.iptreev.item(cur_item)['text'] == src):
                             self.iptreev.insert(cur_item, tk.END, text=dest)
@@ -765,7 +1377,15 @@ class GUI:
                 self.Ping_Hosts_Found.configure(state="disabled");
                 self.Ping_Console_Output.configure(state="disabled");
             
-    def ping_sweep(self,start_ip,end_ip):    
+    def ping_sweep(self,start_ip,end_ip):
+        # Update Database
+        ping_values = {
+            "Timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            "Start_IP": start_ip,
+            "End_IP": end_ip
+        }
+        custT.insert_table('pingsweep',ping_values)        
+
         # Perform the ping sweep    
         current_array = start_ip.split('.');
         current_ip = '.'.join(current_array)
@@ -862,6 +1482,16 @@ class GUI:
                 self.NMAP_Output.configure(state="disabled");
     
     def nmap_scan(self,ip,scan,start,end): 
+        # Update Database
+        nmap_values = {
+            "Timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            "Scan": scan,
+            "IP": ip,
+            "Start_Port": start,
+            "End_Port": end
+        }
+        custT.insert_table('nmap',nmap_values)
+
         self.NMAP_Console_Output.configure(state="normal");
         self.NMAP_Output.configure(state="normal");
         self.NMAP_Console_Output.delete('1.0', tk.END);
@@ -931,16 +1561,132 @@ class GUI:
                 self.Start_Stop_Sniff_Button.configure(text="STOP SNIFF")
                 
     def sniff_for_packets(self):
+        self.traffic_start = datetime.now();
+        self.traffic_reset = True;
         scapy.sniff(prn=lambda packet: self.manage_packets(packet), stop_filter=self.stop_packet_sniff)
+        #scapy.sniff(filter="tcp and port 80", prn=lambda packet: self.manage_packets(packet), stop_filter=self.stop_packet_sniff) # For Testing Purposes
     
     def stop_packet_sniff(self, packet):
         return not self.packetsniff_isLive
     
+    def update_traffic(self):
+        threshold = 50;
+        while True:
+            if self.traffic_update == True:
+                dict_to_update = dict(self.traffic_flow);
+                self.traffic_reset = True;
+                # Update Database
+                for key in dict_to_update:
+                    src, dest = key.split(";")
+                    existing_data = custT.load_traffic_baseline(src, dest)
+                    current_sum = existing_data["Average"] * existing_data["Count"]
+                    new_value = dict_to_update[key];
+                    count = existing_data["Count"] + 1;
+                    new_sum = current_sum + new_value;
+                    avg = new_sum/count;
+                    # Check Traffic Flow
+                    if new_value > existing_data["Average"] + threshold and existing_data["Count"] > 10:
+                        exceeded = new_value - existing_data["Average"] + threshold;
+                        # High Traffic Flow Alert
+                        output = f"High Traffic Alert! ({src} -> {dest}) \n Threshold Exceeded by {exceeded}"
+                        
+                        # Alert
+                        self.Alert_Text.configure(state='normal');
+                        self.Alert_Text.insert("1.0", output);
+                        self.Alert_Text.configure(state='disabled');
+            
+                        # Notify
+                        if self.traffic_alert.get() == 1:
+                            self.notification();
+        
+                        # Database
+                        traffic_values = {   
+                            "Timestamp": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                            "IP_Src": src,
+                            "IP_Dest": dest,
+                            "Average": existing_data["Average"],
+                            "Threshold": threshold,
+                            "Packet_Count": exceeded
+                        }
+                        custT.insert_table('trafficalert',traffic_values)
+
+                        print("High Traffic Alert")
+                        alerts = existing_data["Alerts"] + 1;
+                    else:   
+                        alerts = existing_data["Alerts"];
+
+                    traffic_baseline_values={
+                        'IP_Src': src,
+                        'IP_Dest': dest,
+                        'Average': avg,
+                        'Count': count,
+                        'Alerts': alerts
+                        }
+                    custT.update_traffic_baseline(traffic_baseline_values);
+                    print("Update Complete")
+                    self.traffic_update = False;
+            else:
+                time.sleep(2)
+
     def manage_packets(self,packet):
+        if self.traffic_reset is True:
+            # Clear Dict
+            self.traffic_flow.clear();
+            self.traffic_start = datetime.now();
+            self.traffic_reset = False;
+        
+        # 10 second tick
+        if (datetime.now() - self.traffic_start) >= timedelta(seconds=10):
+            self.traffic_update = True;
+ 
+            # Start the new thread
+            if not self.TrafficUpdate_isLive:
+                self.threadTrafficUp = threading.Thread(target=self.update_traffic)
+                self.running_threads.append(self.threadTrafficUp)
+                self.TrafficUpdate_isLive = True;
+                self.threadTrafficUp.daemon = True;
+                self.threadTrafficUp.start()              
+
         # Packet to Dict
         packet_dict = custT.packet_to_dict(packet);
         self.packet_data_list.append(packet_dict);
+        
+        # Check Packet
+        error_check = custT.packet_scanner(packet_dict);
+        if error_check != "0":
+            # Quarantine
+            filename, quarantine = custT.download_packet(self.settings_dict["Quarantine"],packet_dict["Timestamp"],packet)
+            output = f"Suspicious Packet Detected! ({error_check}) \n Quarantine Dir: {quarantine}"
+            # Alert
+            self.Alert_Text.configure(state='normal');
+            self.Alert_Text.insert("1.0", output);
+            self.Alert_Text.configure(state='disabled');
+            
+            # Notify
+            if self.packet_alert.get() == 1:
+                self.notification();
+        
+            # Database
+            packet_values = {
+                "Timestamp":packet_dict["Timestamp"],
+                "File": filename,
+                "Type": error_check,
+                "QuarantineDir": quarantine
+            }
+            custT.insert_table('packetalert',packet_values)
 
+            
+        
+        # Update Traffic Flow Dict
+        src = packet_dict["Source"];
+        dest = packet_dict["Destination"];
+        
+        joined_key = ";".join([src, dest])
+        if joined_key in self.traffic_flow:
+            self.traffic_flow[joined_key] += 1;
+        else:
+            self.traffic_flow[joined_key] = 1;
+ 
         # Update Table
         self.update_sniffer_table(packet,packet_dict);
         
@@ -953,8 +1699,9 @@ class GUI:
             filter_data = True; 
 
         if filter_string.lower() in str(packet).lower() and filter_data == True:
-            self.packettreev.insert("", "end", text=str(len(self.packet_data_list)), values=(packet_dict.get("Timestamp", ""), packet_dict.get("Source", ""), packet_dict.get("Destination", ""), packet_dict.get("Protocol", ""), packet_dict.get("Bytes Captured", ""), packet_dict.get("Payload", "")))
-        self.packettreev.yview_moveto(1.0)
+            self.packettreev.insert("", "end", text=str(len(self.packet_data_list)), values=(packet_dict.get("Timestamp", ""), packet_dict.get("Source", ""), packet_dict.get("Destination", ""), packet_dict.get("Protocols", ""), packet_dict.get("Bytes Captured", ""), packet_dict.get("Payload", "")))
+        if self.auto_sniff.get() == 1:
+            self.packettreev.yview_moveto(1.0)
         
     def search_sniffer_table(self):
         filter_data = False;
@@ -967,15 +1714,17 @@ class GUI:
         for i, data in enumerate(self.packet_data_list):
             if filter_data and filter_string.lower() not in str(data).lower() and filter_data == True:
                 continue
-            self.packettreev.insert("", "end", text=str(i+1), values=(data.get("Timestamp", ""), data.get("Source", ""), data.get("Destination", ""), data.get("Protocol", ""), data.get("Bytes Captured", ""), data.get("Payload", "")))
-        self.packettreev.yview_moveto(1.0)
+            self.packettreev.insert("", "end", text=str(i+1), values=(data.get("Timestamp", ""), data.get("Source", ""), data.get("Destination", ""), data.get("Protocols", ""), data.get("Bytes Captured", ""), data.get("Payload", "")))
+        print(self.auto_sniff)
+        if self.auto_sniff.get() == 1:
+            self.packettreev.yview_moveto(1.0)
         
-    def adjust_column_widths(self,column_widths):
+    def adjust_column_widths(self,column_widths,module):
         last_column = list(column_widths.keys())[-1]
         for col, width in column_widths.items():
             stretch = True if col != last_column else False
-            self.packettreev.column(col, width=width, minwidth=width, stretch=stretch)
-            self.packettreev.heading(col, text=col.title())
+            module.column(col, width=width, minwidth=width, stretch=stretch)
+            module.heading(col, text=col.title())
 
     def sniffer_search_function(self,search):
         self.sniffer_search_criteria = search;
@@ -987,12 +1736,13 @@ class GUI:
             item_id = self.packettreev.item(selected_item, 'text')
             if item_id.isdigit():  # Check if the extracted part is a valid integer
                 index = int(item_id) - 1
+                print("Index " + str(index))
                 if 0 <= index < len(self.packet_data_list):  # Ensure index is within bounds
                     selected_packet_dict = self.packet_data_list[index] 
                     self.selected_packet = index;
                     self.display_packet_summary();
                 else:
-                    print("Invalid index")
+                    print("Invalid index: " + str(index))
             else:
                 print("Invalid item ID format:")
                 
@@ -1006,6 +1756,111 @@ class GUI:
         self.Packet_Summary_Text.delete("1.0", tk.END) 
         self.Packet_Summary_Text.insert(tk.END, output)        
         self.Packet_Summary_Text.configure(state='disabled');
+    
+    def packet_analyze_on_select(self, event):
+        selected_item = self.packettreevA.focus()
+        if selected_item:
+            item_id = self.packettreevA.item(selected_item, 'text')
+            if item_id.isdigit():  # Check if the extracted part is a valid integer
+                index = int(item_id)
+                if 0 <= index < len(self.analyze_packet_list):  # Ensure index is within bounds
+                    selected_packet_dict = self.analyze_packet_list[index] 
+                    self.selected_analysis_packet = index;
+                    self.display_packet_analysis();
+                else:
+                    print("Invalid index: " + str(index))
+            else:
+                print("Invalid item ID format:")
+                
+    def display_packet_analysis(self):
+        packet = self.analyze_packet_list[self.selected_analysis_packet]["Packet"]
+        
+        # Packet Values
+        old_stdout = sys.stdout
+        sys.stdout = buffer = io.StringIO()
+        scapy.ls(packet, verbose=False)
+        sys.stdout = old_stdout
+        output_value_str = buffer.getvalue()        
+     
+        # Packet HexDump
+        old_stdout = sys.stdout
+        sys.stdout = buffer = io.StringIO()
+        scapy.hexdump(packet)
+        sys.stdout = old_stdout
+        output_hex_str = buffer.getvalue()  
+        
+        # Summary
+        output = ""
+        selected_packet_data = self.analyze_packet_list[self.selected_analysis_packet]
+        for key, value in selected_packet_data.items():
+            output += f"{key}: {value}\n"
+            
+        # Output Values
+        self.Packet_Analysis_Values_Text.configure(state='normal');
+        self.Packet_Analysis_Values_Text.delete("1.0", tk.END);
+        self.Packet_Analysis_Values_Text.insert(tk.END, output_value_str);        
+        self.Packet_Analysis_Values_Text.configure(state='disabled');
+
+        self.Packet_Analysis_Hex_Text.configure(state='normal');
+        self.Packet_Analysis_Hex_Text.delete("1.0", tk.END);
+        self.Packet_Analysis_Hex_Text.insert(tk.END, output_hex_str);        
+        self.Packet_Analysis_Hex_Text.configure(state='disabled');
+
+        self.Packet_Analysis_Summary_Text.configure(state='normal');
+        self.Packet_Analysis_Summary_Text.delete("1.0", tk.END);
+        self.Packet_Analysis_Summary_Text.insert(tk.END, output);        
+        self.Packet_Analysis_Summary_Text.configure(state='disabled');
+                
+    def load_analysis_table(self):
+        # Refresh 
+        self.analyze_packet_list = custT.load_packets(self.settings_dict["Analyze"]);  
+        self.packettreevA.delete(*self.packettreevA.get_children())
+
+        filter_data = False;
+        filter_string = self.Analyze_Search_Input.get("1.0", tk.END).strip();
+        if filter_string == "Input Search Criteria..." or "":
+            filter_data = False;
+        else:
+            filter_data = True; 
+
+        for analyze_packet_dict in self.analyze_packet_list:
+            if (filter_string.lower() in str(analyze_packet_dict).lower() and filter_data == True) or not filter_data:
+                self.packettreevA.insert("", "end", text=str(self.analyze_packet_list.index(analyze_packet_dict)), 
+                values=(
+                    analyze_packet_dict.get("Timestamp", ""),
+                    analyze_packet_dict.get("Source", ""),
+                    analyze_packet_dict.get("Destination", ""),
+                    analyze_packet_dict.get("Protocols", ""),
+                    analyze_packet_dict.get("Bytes Captured", ""),
+                    analyze_packet_dict.get("Payload", "")
+                ))
+                
+    def delete_refresh(self):
+        custT.delete_packet_download(self.analyze_packet_list[self.selected_analysis_packet]["Directory"]);
+        self.load_analysis_table();
+
+    def select_directory(self,key,module):
+        directory = tk.filedialog.askdirectory()
+        if directory == "":
+            directory = self.settings_dict[key];
+
+        # Update Settings
+        self.settings_dict[key] = directory
+        self.update_settings()
+        
+        # Reload Module
+        module.configure(state='normal');
+        module.delete("1.0", tk.END) 
+        module.insert(tk.END, self.settings_dict[key])        
+        module.configure(state='disabled');
+
+    def update_settings(self):
+        # Update & Refresh Settings
+        custT.updateconfig(self.settings_dict);
+        self.settings_dict = custT.loadconfig();
+
+    def notification(self):
+        winsound.MessageBeep(winsound.MB_ICONASTERISK)  # Play notification sound    
                 
 #Instantiate & Initialize
 GUI = GUI(window); 

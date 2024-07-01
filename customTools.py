@@ -3,9 +3,14 @@ import psutil
 import socket
 import os
 import configparser
-from scapy.all import wrpcap
+from scapy.all import *
+from scapy.layers.inet import ICMP, IP, TCP, UDP
+from scapy.layers.http import HTTP
 from datetime import datetime
+import json
 import uuid
+from pyx import canvas, text
+import sqlite3
 
 def Get_Device():
     try:
@@ -147,12 +152,20 @@ def Get_Start_End_IP_Ping(subnet,subdomain):
     
     return start_ip,end_ip
 
+def expand(packet):
+    yield packet
+    while packet.payload:
+        packet = packet.payload
+        yield packet
+
 def packet_to_dict(packet):
     # Get Timestamp
-    timestamp = packet.time;
+    timestamp = float(packet.time);
     datetime_obj = datetime.fromtimestamp(timestamp);
     # Convert datetime object to a string in a specific format
     formatted_datetime = datetime_obj.strftime("%Y-%m-%d %H:%M:%S")
+    
+    protocols = [layer.__name__ for layer in packet.layers()]
     packet_data = {
         "Timestamp": formatted_datetime,
         "Bytes on Wire": len(packet),
@@ -162,49 +175,134 @@ def packet_to_dict(packet):
         "Source Port": packet.sport if hasattr(packet, 'sport') else None,
         "Destination": packet[0][1].dst if packet.haslayer('IP') else packet.dst,
         "Destination Port": packet.dport if hasattr(packet, 'dport') else None,
-        "Protocol": packet[0][1].proto if packet.haslayer('IP') else packet.name,
-        "Payload":  packet[0].payload if packet.haslayer('Raw') else str(packet.payload),
+        "Protocols": protocols,
+        "Payload":  bytes(packet.payload),
         "Packet" : packet
     }
-    
-    # Add specific protocol information
-    if 'IP' in packet:
-        packet_data["IP Protocol"] = packet['IP'].proto
-    if 'TCP' in packet:
-        packet_data["TCP Flags"] = packet['TCP'].flags
-    if 'UDP' in packet:
-        packet_data["UDP Length"] = packet['UDP'].len
-    if 'Ether' in packet:
-        packet_data["Ethernet Type"] = hex(packet['Ether'].type)
-    if 'ICMP' in packet:
-        packet_data["ICMP Type"] = packet['ICMP'].type
-        packet_data["ICMP Code"] = packet['ICMP'].code
-    if 'HTTP' in packet:
-        packet_data["HTTP Method"] = packet['HTTP'].Method.decode('utf-8')
-        packet_data["HTTP Host"] = packet['HTTP'].Host.decode('utf-8')
-    if 'HTTPS' in packet:
-        packet_data["HTTPS Method"] = packet['HTTPS'].Method.decode('utf-8')
-        packet_data["HTTPS Host"] = packet['HTTPS'].Host.decode('utf-8')
-    if 'RFID' in packet:
-        # Assuming RFID packet structure, modify accordingly
-        packet_data["RFID Data"] = packet['RFID'].data
-    
+   
     return packet_data;
+
+def packet_scanner(packet):
+    error = "0"
+    if Raw in packet:
+        print("Raw Detected");
+        raw_data = packet[Raw].load.decode('utf-8', 'ignore')
+        if "SELECT" in raw_data or "INSERT" in raw_data or "DROP" in raw_data: # Check SQL Injection
+            print("Potential SQL Injection Detected")
+            error = "Potential SQL Injection";
+    if HTTP in packet:
+        print("Unsecure HTTP packet detected") # HTTP Packet
+        error = "HTTP Packet";
+
+    return error
 
 def download_packet(destination,timestamp,packet):
     print("Saving")
     sanitized_timestamp = timestamp.replace(":", "-")
     unique_id = uuid.uuid4();
     pcap_file = f"{destination}/{sanitized_timestamp}_{unique_id}.pcap"
-     
+    filename = f"{sanitized_timestamp}_{unique_id}.pcap"     
+
     # Save packets to the specified PCAP file
     wrpcap(pcap_file, packet, append=True)
     print(f"Packet saved to {pcap_file}")
+    
+    return filename, pcap_file
 
+def load_packets(destination):
+    packet_dicts = []
+    
+    # Iterate over files in the directory
+    for filename in os.listdir(destination):
+        if filename.endswith(".pcap"):
+            file_path = os.path.join(destination, filename)
+
+            # Use rdpcap from scapy to read pcap file
+            packets = rdpcap(file_path)
+            
+            for packet in packets:
+                # Convert each packet to dictionary and append to list
+                packet_dict = packet_to_dict(packet);
+                packet_dict["Directory"] = file_path;
+                packet_dict["File"] = filename;
+                packet_dicts.append(packet_dict);
+
+    return packet_dicts
+
+def download_packet_diagram(destination,packets,name):
+    name_prefix = f"{name}_packet_diagram";
+    
+    for index, packet in enumerate(packets[0:1]):
+        file_path = f"{destination}/{name_prefix}_packet_{index}.pdf"
+        
+        packet.pdfdump(layer_shift=1)
+            
+
+def delete_packet_download(destination):
+    if os.path.isfile(destination):
+        try:
+            os.remove(destination)
+            print(f"Deleted {destination}")
+        except Exception as e:
+            print(f"Error deleting {destination}: {e}")
+    else:
+        print(f"The file {destination} does not exist.")
+        
 # System Tools
-#def saveconfig():
+def updateconfig(settings_dict):
+    json_default_dir = "settings.json";
+    # Check if JSON file exists
+    if os.path.exists(json_default_dir):
+        # Load existing JSON data
+        with open(json_default_dir, 'r') as file:
+            existing_data = json.load(file)
+    else:
+        # If JSON file doesn't exist, create an empty dictionary
+        existing_data = {
+            "Analyze": "pcap_download",
+            "Save": "pcap_download",
+            "Quarantine": "pcap_download/quarantine",
+            "PDF" : "reports_pdf",
+            "Diagram" : "packet_diagrams"
+        }   
 
-#def loadconfig():
+    # Compare with existing data and update if there are changes
+    if existing_data != settings_dict:
+        existing_data.update(settings_dict)
+
+        # Write updated JSON data back to the file
+        with open(json_default_dir, 'w') as file:
+            json.dump(existing_data, file, indent=4)
+
+        print(f"JSON file Updated");
+    else:
+        print("No changes detected. JSON file not updated.")
+    
+
+def loadconfig():
+    json_default_dir = "settings.json";
+    if os.path.exists(json_default_dir):
+        # Load JSON data from file into a dictionary
+        with open(json_default_dir, 'r') as file:
+            data = json.load(file)
+        return data
+    else:
+        print(f"JSON file '{json_default_dir}' not found. Loading Default Config.")
+        default_config = {
+            "Analyze": "pcap_download",
+            "Save": "pcap_download",
+            "Quarantine": "pcap_download/quarantine",
+            "PDF" : "reports_pdf",
+            "Diagram" : "packet_diagrams"
+        }
+        
+        save_path = "pcap_download";
+        os.makedirs(save_path, exist_ok=True);
+        os.makedirs(os.path.join(save_path, "quarantine"), exist_ok=True);
+        os.makedirs("reports_pdf",exist_ok=True);
+        os.makedirs("packet_diagrams",exist_ok=True);
+        
+        return default_config 
 
 def shutdown(root,running_threads):
     print("Shutting Down Application...")
@@ -212,3 +310,152 @@ def shutdown(root,running_threads):
     os._exit(0);
     
 
+# Database Tools
+def create_tables():
+    conn = sqlite3.connect('network_monitor.db');
+    sql = conn.cursor();   
+    
+    sql.execute('''
+        CREATE TABLE IF NOT EXISTS trafficalert (
+        ID INTEGER PRIMARY KEY AUTOINCREMENT,
+        Timestamp TEXT NOT NULL,
+        IP_Src TEXT,        
+        IP_Dest TEXT,
+        Average FLOAT,
+        Threshold INTEGER,
+        Packet_Count INTEGER        
+    )
+    ''')
+    
+    sql.execute('''
+        CREATE TABLE IF NOT EXISTS packetalert (
+        ID INTEGER PRIMARY KEY AUTOINCREMENT,
+        Timestamp TEXT NOT NULL,
+        File TEXT,
+        Type TEXT,
+        QuarantineDir TEXT        
+    )
+    ''')
+
+    sql.execute('''
+        CREATE TABLE IF NOT EXISTS trafficbase (
+        IP_Src TEXT,
+        IP_Dest TEXT,
+        Average FLOAT,
+        Count INTEGER,
+        Alerts INTEGER        
+    )
+    ''')
+
+    sql.execute('''
+        CREATE TABLE IF NOT EXISTS ipscan (
+        ID INTEGER PRIMARY KEY AUTOINCREMENT,
+        Timestamp TEXT NOT NULL,
+        IP_Src TEXT,
+        IP_Dest TEXT
+    )
+    ''')
+
+    sql.execute('''
+        CREATE TABLE IF NOT EXISTS pingsweep (
+        ID INTEGER PRIMARY KEY AUTOINCREMENT,
+        Timestamp TEXT NOT NULL,
+        Start_IP TEXT,
+        End_IP TEXT
+    )
+    ''')
+
+    sql.execute('''
+        CREATE TABLE IF NOT EXISTS nmap (
+        ID INTEGER PRIMARY KEY AUTOINCREMENT,
+        Timestamp TEXT NOT NULL,
+        Scan TEXT,
+        IP TEXT,
+        Start_Port TEXT,
+        End_Port TEXT
+    )
+    ''')
+
+    conn.commit()
+    conn.close()
+    
+
+def insert_table(table, input_dict):
+    conn = sqlite3.connect('network_monitor.db')
+    sql = conn.cursor()
+    
+    columns = ', '.join(input_dict.keys())
+    placeholders = ', '.join('?' for _ in input_dict)
+    values = list(input_dict.values())
+
+    sql.execute(f'INSERT INTO {table} ({columns}) VALUES ({placeholders})', values)
+    
+    # Commit & Close    
+    conn.commit()
+    conn.close()
+    
+def update_row(table,input_dict,condition):
+    conn = sqlite3.connect('network_monitor.db')
+    sql = conn.cursor()    
+
+    # Commit & Close    
+    conn.commit()
+    conn.close()
+    
+def load_traffic_baseline(src, dest):
+    info_dict = {}
+    conn = sqlite3.connect('network_monitor.db')
+    sql = conn.cursor()    
+
+    query = '''
+        SELECT * FROM trafficbase
+        WHERE IP_Src = ? AND IP_Dest = ?
+    '''
+    sql.execute(query, (src, dest))
+    row = sql.fetchone()
+    
+    if row is not None:
+        print("Updating Existing Traffic Log")
+        # Access column in the row
+        average = row[2]  # Average
+        count = row[3]  # Count
+        alerts = row[4]
+    else:
+        print("Unique Src and Dest Detected")
+        average = 0;
+        count = 0;
+        alerts = 0;
+    
+    info_dict = {
+         "Average": average,
+         "Count": count,
+         "Alerts": alerts
+        }
+
+    # Commit & Close    
+    conn.commit()
+    conn.close()    
+    
+    return info_dict;
+
+def update_traffic_baseline(input_dict):
+    conn = sqlite3.connect('network_monitor.db')
+    sql = conn.cursor()
+    sql.execute('''
+                DELETE FROM trafficbase
+                WHERE IP_Src = ? AND IP_Dest = ?
+            ''', (input_dict["IP_Src"], input_dict["IP_Dest"]))
+    sql.execute('''
+        INSERT OR REPLACE INTO trafficbase (IP_Src, IP_Dest, Average, Count, Alerts)
+        VALUES (?, ?, ?, ?, ?)
+    ''', (input_dict["IP_Src"], input_dict["IP_Dest"], input_dict["Average"], input_dict["Count"], input_dict["Alerts"]))
+    conn.commit()
+    conn.close()
+    
+def fetch_data_query(query):
+    conn = sqlite3.connect('network_monitor.db')
+    sql = conn.cursor()  
+    sql.execute(query)
+    rows = sql.fetchall()
+    conn.close()
+    return rows
