@@ -1127,7 +1127,6 @@ class GUI:
                 self.Current_Bandwidth_Speed.delete("1.0", tk.END);
                 self.Current_Bandwidth_Speed.insert("1.0", output);
                 self.Current_Bandwidth_Speed.configure(state='disabled');
-                
 
                 self.net_in_values.append(net_in);
                 self.net_out_values.append(net_out);
@@ -1456,9 +1455,10 @@ class GUI:
                    'Ping Scan':['-sn'],
                    'List Scan':['sL'],
                    'OS Detection':['-O']}
-        if scan not in scan_dict.keys() and isinstance(start, int) and isinstance(end, int):
+        if scan not in scan_dict.keys() and isinstance(start, int) and isinstance(end, int) or ip == "Input IP Address..." or ip == "":
             mb.showwarning("Alert", "Invalid Inputs!")
             Fail = True;
+        
   
         # Start the new thread
         if not self.NMAPScan_isLive and not Fail:
