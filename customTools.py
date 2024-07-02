@@ -152,12 +152,6 @@ def Get_Start_End_IP_Ping(subnet,subdomain):
     
     return start_ip,end_ip
 
-def expand(packet):
-    yield packet
-    while packet.payload:
-        packet = packet.payload
-        yield packet
-
 def packet_to_dict(packet):
     # Get Timestamp
     timestamp = float(packet.time);
@@ -182,17 +176,25 @@ def packet_to_dict(packet):
    
     return packet_data;
 
-def packet_scanner(packet):
-    error = "0"
-    if Raw in packet:
+def packet_scanner(packet_dict):
+    error = ""
+    try:
+        payload = str(packet_dict["Payload"])
+    except UnicodeDecodeError:
+        payload = "";
+        print("Failed to decode payload")
+    print(f"Payload : {str(payload)}")
+    if 'Raw' in packet_dict["Protocols"]:
         print("Raw Detected");
-        raw_data = packet[Raw].load.decode('utf-8', 'ignore')
-        if "SELECT" in raw_data or "INSERT" in raw_data or "DROP" in raw_data: # Check SQL Injection
+        if "SELECT" in payload or "INSERT" in payload or "DROP" in payload: # Check SQL Injection
             print("Potential SQL Injection Detected")
-            error = "Potential SQL Injection";
-    if HTTP in packet:
+            error += " Potential SQL Injection ";
+    if "HTTP" in payload:
         print("Unsecure HTTP packet detected") # HTTP Packet
-        error = "HTTP Packet";
+        error += " HTTP Packet ";
+    elif 'HTTP' in packet_dict["Protocols"]:
+        print("Unsecure HTTP packet detected") # HTTP Packet
+        error += " HTTP Packet ";
 
     return error
 

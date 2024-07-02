@@ -3,7 +3,7 @@ import sys
 import io
 from io import StringIO
 import tkinter as tk;
-from tkinter import PhotoImage, messagebox as mb;
+from tkinter import W, PhotoImage, messagebox as mb;
 from tkinter import SEL, ttk
 from typing import Self
 import psutil;
@@ -1565,6 +1565,7 @@ class GUI:
         self.traffic_reset = True;
         scapy.sniff(prn=lambda packet: self.manage_packets(packet), stop_filter=self.stop_packet_sniff)
         #scapy.sniff(filter="tcp and port 80", prn=lambda packet: self.manage_packets(packet), stop_filter=self.stop_packet_sniff) # For Testing Purposes
+        
     
     def stop_packet_sniff(self, packet):
         return not self.packetsniff_isLive
@@ -1653,7 +1654,7 @@ class GUI:
         
         # Check Packet
         error_check = custT.packet_scanner(packet_dict);
-        if error_check != "0":
+        if error_check != "":
             # Quarantine
             filename, quarantine = custT.download_packet(self.settings_dict["Quarantine"],packet_dict["Timestamp"],packet)
             output = f"Suspicious Packet Detected! ({error_check}) \n Quarantine Dir: {quarantine}"
